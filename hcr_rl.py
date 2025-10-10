@@ -1,3 +1,4 @@
+
 import sys
 import csv
 import time
@@ -39,11 +40,27 @@ def load_config(path="hcr_config.json"):
     try:
         with open(path, "r") as f:
             config = json.load(f)
-        for key in ['setup', 'gameplay', 'menu', 'game_over']:
+        
+        # Handle single-object stages
+        for key in ['setup', 'menu', 'game_over']:
             if config.get(key) and config[key].get('ref_img_b64'):
                 img_bytes = base64.b64decode(config[key]['ref_img_b64'])
                 img = Image.open(io.BytesIO(img_bytes))
                 config[key]['ref_img_np'] = cv2.cvtColor(np.array(img), cv2.COLOR_RGB2GRAY)
+        
+        # <-- MODIFIED: Special handling for the 'gameplay' list
+        if 'gameplay' in config and isinstance(config['gameplay'], list) and len(config['gameplay']) > 0:
+            # We'll decode the image for the first gameplay set to use as the reference
+            gameplay_set = config['gameplay'][0]
+            if gameplay_set.get('ref_img_b64'):
+                img_bytes = base64.b64decode(gameplay_set['ref_img_b64'])
+                img = Image.open(io.BytesIO(img_bytes))
+                # Store the decoded image back into that first dictionary
+                config['gameplay'][0]['ref_img_np'] = cv2.cvtColor(np.array(img), cv2.COLOR_RGB2GRAY)
+        else:
+            print(f"❌ Error: 'gameplay' key in '{path}' is not a non-empty list. Please re-annotate.")
+            sys.exit(1)
+            
         print(f"✅ Configuration and reference images loaded from '{path}'")
         return config
     except Exception as e:
@@ -62,7 +79,7 @@ def get_image_similarity(img1_gray, img2_gray):
 
 def get_current_screen_mode(current_frame_gray, config):
     """
-    Recognizes the screen mode and ⭐ LOGGING: now returns the scores dictionary.
+    Recognizes the screen mode and returns the scores dictionary.
     """
     h, w = current_frame_gray.shape
     roi = { 'x1': int(w * RECOGNITION_ROI['x1']), 'y1': int(h * RECOGNITION_ROI['y1']),
@@ -71,7 +88,13 @@ def get_current_screen_mode(current_frame_gray, config):
     
     scores = {}
     for mode in ['gameplay', 'menu', 'game_over']:
-        ref_roi_gray = config[mode]['ref_img_np'][roi['y1']:roi['y2'], roi['x1']:roi['x2']]
+        if mode == 'gameplay':
+            # <-- MODIFIED: Use the reference image from the first item in the gameplay list
+            ref_img_np = config['gameplay'][0]['ref_img_np']
+        else:
+            ref_img_np = config[mode]['ref_img_np']
+            
+        ref_roi_gray = ref_img_np[roi['y1']:roi['y2'], roi['x1']:roi['x2']]
         scores[mode] = get_image_similarity(current_roi_gray, ref_roi_gray)
 
     best_match_mode = max(scores, key=scores.get)
@@ -80,7 +103,6 @@ def get_current_screen_mode(current_frame_gray, config):
         return best_match_mode.upper(), scores
     return "UNKNOWN", scores
 
-# (Other sensing and action functions remain unchanged)
 def get_car_orientation(frame_rgb):
     mask = cv2.inRange(frame_rgb, np.array(CAR_RED_MIN), np.array(CAR_RED_MAX)); rows, cols = np.where(mask)
     if len(rows) < 50: return 0
@@ -102,16 +124,19 @@ def sense_environment(gray_frame):
     return slope, airborne
 def get_state_index(slope, air, fuel_low, angle_code): return angle_code + (fuel_low * 4) + (air * 8) + (slope * 16)
 def choose_action(Q_table, state, eps): return random.choice([0, 1, 2]) if random.random() < eps else int(np.argmax(Q_table[state]))
+
 def perform_action(action, config, game_region):
     if action == 0: return
     pedal_key = 'gas_roi' if action == 1 else 'brake_roi'
     try:
-        roi = config['gameplay'][pedal_key]
+        # <-- MODIFIED: Use the pedal ROI from the first item in the gameplay list
+        roi = config['gameplay'][0][pedal_key]
         if roi is None: return
         center_x = game_region['left'] + (roi['x1'] + roi['x2']) // 2
         center_y = game_region['top'] + (roi['y1'] + roi['y2']) // 2
         pyautogui.mouseDown(center_x, center_y); time.sleep(MOUSE_PRESS_SECONDS); pyautogui.mouseUp(center_x, center_y)
-    except KeyError: pass
+    except (KeyError, IndexError): pass
+
 def get_reward(angle_code, prev_angle_code):
     if angle_code == 3: return -20.0;
     if angle_code == 2: return -2.0;
@@ -134,11 +159,9 @@ def main():
     game_region = config['setup']['game_region']
     Q = np.zeros((48, 3), dtype=np.float32)
     
-    # ⭐ NEW: Setup for CSV logging
     log_file_path = 'training_log.csv'
     log_headers = ['episode', 'total_reward', 'steps_survived', 'epsilon']
     
-    # Write the header row to the CSV file
     with open(log_file_path, 'w', newline='') as f:
         writer = csv.writer(f)
         writer.writerow(log_headers)
@@ -153,14 +176,14 @@ def main():
             state, prev_angle, action = 0, 0, 0
             epsilon = EPS_END + (EPS_START - EPS_END) * np.exp(-1. * ep / EPS_DECAY)
             
-            final_steps = 0 # To record how long the agent survived
+            final_steps = 0
             
             for step in range(STEPS_PER_EP):
                 frame_rgb = np.array(sct.grab(game_region))[:, :, :3]
                 frame_gray = cv2.cvtColor(frame_rgb, cv2.COLOR_RGB2GRAY)
                 mode, scores = get_current_screen_mode(frame_gray, config)
                 
-                print(f"Step {step} | 🔎 Screen scores: GP={scores['gameplay']:.2f}, M={scores['menu']:.2f}, GO={scores['game_over']:.2f} -> Match: {mode}")
+                print(f"Step {step} | 🔎 Screen scores: GP={scores.get('gameplay', 0):.2f}, M={scores.get('menu', 0):.2f}, GO={scores.get('game_over', 0):.2f} -> Match: {mode}")
 
                 if mode == "MENU":
                     if is_episode_running: break
@@ -187,7 +210,7 @@ def main():
                         reward = -20.0
                         episode_reward += reward
                         Q[state, action] += ALPHA * (reward - Q[state, action])
-                        final_steps = step # Record the final step count
+                        final_steps = step
                         break 
                     else:
                         continue
@@ -197,8 +220,8 @@ def main():
                         print("   -> State: Gameplay detected. Starting RL.")
                         is_episode_running = True
 
-                    # SENSE, LEARN, ACT... (no changes here)
-                    fuel_roi = config['gameplay']['fuel_roi']
+                    # <-- MODIFIED: Use the fuel ROI from the first item in the gameplay list
+                    fuel_roi = config['gameplay'][0]['fuel_roi']
                     fuel_img = frame_rgb[fuel_roi['y1']:fuel_roi['y2'], fuel_roi['x1']:fuel_roi['x2']]
                     green_frac = np.mean((fuel_img[:,:,1] > 140) & (fuel_img[:,:,0] < 120))
                     fuel_low = int(green_frac < FUEL_LOW_FRAC)
@@ -224,10 +247,9 @@ def main():
                     print(f"   -> State: Unknown screen. Waiting...")
                     time.sleep(0.5)
                 
-                final_steps = step # Continuously update step count
+                final_steps = step
                 time.sleep(1.0 / LOOP_HZ)
             
-            # ⭐ NEW: Log the results of the episode to the CSV file
             with open(log_file_path, 'a', newline='') as f:
                 writer = csv.writer(f)
                 writer.writerow([ep + 1, episode_reward, final_steps, epsilon])
