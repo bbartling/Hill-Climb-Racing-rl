@@ -43,15 +43,15 @@ class MonitorSelector(tk.Toplevel):
         self.destroy()
 
 # -------------------------------
-# Main Annotator (Corrected)
+# Main Annotator (Simplified and Fixed)
 # -------------------------------
 class MultiScreenAnnotator(tk.Tk):
     STAGES = ["SETUP", "GAMEPLAY", "MENU", "GAME_OVER"]
-    GAMEPLAY_TOOLS = ["fuel", "gas", "brake"]
+    GAMEPLAY_TOOLS = ["fuel", "gas", "brake", "distance"]
 
     def __init__(self):
         super().__init__()
-        self.title("HCR - Final Annotator")
+        self.title("HCR - Annotator (Simplified)")
         self.geometry("1200x800")
         self.minsize(900, 600)
 
@@ -62,13 +62,13 @@ class MultiScreenAnnotator(tk.Tk):
         self.canvas_rect_id = None
         self.start_xy = None
         self.current_stage_idx = 0
-        self.active_tool = "fuel"
-
+        
+        # SIMPLIFIED: `game_over` no longer needs a restart_area_roi.
         self.config_data = {
             "setup": {"ref_img_b64": None, "game_region": None},
             "gameplay": [],
             "menu": {"ref_img_b64": None, "start_button_roi": None},
-            "game_over": {"ref_img_b64": None, "restart_area_roi": None},
+            "game_over": {"ref_img_b64": None, "distance_meter_roi": None},
         }
         self.current_gameplay_set = {}
 
@@ -82,15 +82,17 @@ class MultiScreenAnnotator(tk.Tk):
         self.stage_label = tk.Label(top, text="", font=("Segoe UI", 12, "bold"))
         self.stage_label.pack()
 
-        tool_row = tk.Frame(self, pady=6)
-        self.tool_row = tool_row
-        tk.Label(tool_row, text="Gameplay tool:", font=("Segoe UI", 10)).pack(side=tk.LEFT, padx=(10,4))
-        self.tool_var = tk.StringVar(value=self.active_tool)
-        for tool, key in zip(self.GAMEPLAY_TOOLS, ["F", "G", "B"]):
-            b = tk.Radiobutton(tool_row, text=f"{tool.upper()} ({key})", value=tool,
-                               variable=self.tool_var, command=self._on_tool_change)
+        # --- Gameplay Tools (remains the same) ---
+        self.gameplay_tool_row = tk.Frame(self, pady=6)
+        tk.Label(self.gameplay_tool_row, text="Gameplay tool:", font=("Segoe UI", 10)).pack(side=tk.LEFT, padx=(10,4))
+        self.tool_var_gameplay = tk.StringVar(value=self.GAMEPLAY_TOOLS[0])
+        for tool, key in zip(self.GAMEPLAY_TOOLS, ["F", "G", "B", "D"]):
+            b = tk.Radiobutton(self.gameplay_tool_row, text=f"{tool.upper()} ({key})", value=tool,
+                               variable=self.tool_var_gameplay, command=self._on_tool_change)
             b.pack(side=tk.LEFT, padx=6)
 
+        # REMOVED: The game over tool row is no longer needed.
+        
         self.canvas = tk.Canvas(self, bg="#2c2c2c")
         self.canvas.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
         self.canvas.bind("<Configure>", lambda e: self._render_image())
@@ -112,9 +114,7 @@ class MultiScreenAnnotator(tk.Tk):
         self.capture_btn.pack(side=tk.LEFT, padx=8)
         self.undo_btn = tk.Button(btns, text="Clear Current ROI", command=self._clear_current_roi)
         self.undo_btn.pack(side=tk.LEFT, padx=8)
-        
         self.add_gameplay_btn = tk.Button(btns, text="✅ Add Gameplay Set", command=self._save_current_gameplay_set)
-
         self.next_btn = tk.Button(btns, text="Confirm & Next ▶", state=tk.DISABLED, command=self._next_stage)
         self.next_btn.pack(side=tk.LEFT, padx=8)
         self.save_btn = tk.Button(btns, text="Save Config JSON", state=tk.DISABLED, command=self._save_json)
@@ -124,6 +124,7 @@ class MultiScreenAnnotator(tk.Tk):
         self.bind("<f>", lambda e: self._set_tool("fuel"))
         self.bind("<g>", lambda e: self._set_tool("gas"))
         self.bind("<b>", lambda e: self._set_tool("brake"))
+        self.bind("<d>", lambda e: self._set_tool("distance"))   # ← add this
         self.bind("<Return>", lambda e: self._try_next())
 
     @property
@@ -133,22 +134,23 @@ class MultiScreenAnnotator(tk.Tk):
     def _update_ui_for_stage(self):
         stage = self.current_stage
         
-        self.tool_row.pack_forget()
+        self.gameplay_tool_row.pack_forget()
         self.add_gameplay_btn.pack_forget()
         self.next_btn.pack(side=tk.LEFT, padx=8)
 
         if stage == "GAMEPLAY":
-            self.tool_row.pack(side=tk.TOP, fill=tk.X)
+            self.gameplay_tool_row.pack(side=tk.TOP, fill=tk.X)
             self.add_gameplay_btn.pack(side=tk.LEFT, padx=8)
             self.stage_label.config(text=f"Stage: {stage} (Sets Saved: {len(self.config_data['gameplay'])})")
-        else:
+        else: # Covers SETUP, MENU, and GAME_OVER
             self.stage_label.config(text=f"Stage: {stage}")
 
+        # SIMPLIFIED: Instructions for the final step are clearer now.
         stage_texts = {
             "SETUP": "STEP 1 — SETUP:\n1. Get the game into its main gameplay view.\n2. Click 'Load Screenshot' or 'Capture Screen'.\n3. Draw the main GAME REGION rectangle.",
-            "GAMEPLAY": "STEP 2 — GAMEPLAY (Collection):\n1. Load/Capture a gameplay screen.\n2. Draw ROIs for FUEL, GAS, and BRAKE.\n3. Click 'Add Gameplay Set' to save. Repeat for more images.\n4. Click 'Confirm & Next' when done collecting.",
-            "MENU": "STEP 3 — MENU:\n1. Navigate to the game's main menu.\n2. 'Load' or 'Capture', then draw the START BUTTON area.",
-            "GAME_OVER": "STEP 4 — GAME OVER:\n1. Get to the game-over screen.\n2. 'Load' or 'Capture', then draw the RESTART area."
+            "GAMEPLAY": "STEP 2 — GAMEPLAY (Collection):\n1. Load/Capture a gameplay screen.\n2. Draw ROIs for FUEL Bar, GAS Peddle, and BRAKE Peddle.\n3. Click 'Add Gameplay Set' to save. Repeat for more images.\n4. Click 'Confirm & Next' when done collecting.",
+            "MENU": "STEP 3 — RESTART GAME:\n1. Navigate to the pages menu.\n2. 'Load' or 'Capture', then draw the START BUTTON area.",
+            "GAME_OVER": "STEP 4 — DRIVER DOWN:\n1. Get to the game-over screen.\n2. 'Load' or 'Capture', then draw ONE box around the final DISTANCE meter."
         }
         self.instructions_label.config(text=stage_texts.get(stage, ""))
         self._update_button_states()
@@ -160,25 +162,126 @@ class MultiScreenAnnotator(tk.Tk):
         self.next_btn.config(state=tk.DISABLED)
         self.add_gameplay_btn.config(state=tk.DISABLED)
 
-        s_key = s.lower()
         if s == "SETUP":
-            if all(c["setup"].values()):
-                self.next_btn.config(state=tk.NORMAL)
+            if c["setup"].get("game_region"): self.next_btn.config(state=tk.NORMAL)
         elif s == "GAMEPLAY":
-            if all(k in self.current_gameplay_set for k in ["ref_img_b64", "fuel_roi", "gas_roi", "brake_roi"]):
+            if all(k in self.current_gameplay_set for k in ["ref_img_b64", "fuel_roi", "gas_roi", "brake_roi", "distance_roi"]):
                 self.add_gameplay_btn.config(state=tk.NORMAL)
-            if len(c["gameplay"]) > 0:
-                self.next_btn.config(state=tk.NORMAL)
-        elif s_key in c and all(c[s_key].values()): # Works for MENU and GAME_OVER
-            self.next_btn.config(state=tk.NORMAL)
+            if len(c["gameplay"]) > 0: self.next_btn.config(state=tk.NORMAL)
+        elif s == "MENU":
+            if c["menu"].get("start_button_roi"): self.next_btn.config(state=tk.NORMAL)
+        # SIMPLIFIED: Only check for the distance meter now.
+        elif s == "GAME_OVER":
+            if c["game_over"].get("distance_meter_roi"):
+                 self.next_btn.config(state=tk.NORMAL)
 
+        # SIMPLIFIED: Final check no longer needs restart_area_roi.
         all_done = (
             c["setup"]["game_region"] and
             len(c["gameplay"]) > 0 and
             c["menu"]["start_button_roi"] and
-            c["game_over"]["restart_area_roi"]
+            c["game_over"]["distance_meter_roi"]
         )
         self.save_btn.config(state=tk.NORMAL if all_done else tk.DISABLED)
+
+    def _process_new_image(self, pil_image):
+        stage = self.current_stage
+        if stage == "SETUP":
+            self.current_img = pil_image
+            self.config_data["setup"]["ref_img_b64"] = self._pil_to_b64(self.current_img)
+        else:
+            game_region = self.config_data["setup"]["game_region"]
+            if not game_region:
+                messagebox.showerror("Error", "Game region not set. Please complete the SETUP stage first.")
+                return
+            l, t, w, h = game_region["left"], game_region["top"], game_region["width"], game_region["height"]
+            if pil_image.width < (l + w) or pil_image.height < (t + h):
+                messagebox.showwarning("Warning", "The loaded image is smaller than the defined game region.")
+            
+            cropped_img = pil_image.crop((l, t, l + w, t + h)).copy()
+            self.current_img = cropped_img
+            b64_img = self._pil_to_b64(self.current_img)
+            stage_key = stage.lower()
+
+            if stage_key == "gameplay":
+                self.current_gameplay_set = {"ref_img_b64": b64_img}
+            elif stage_key in self.config_data:
+                self.config_data[stage_key]["ref_img_b64"] = b64_img
+        
+        self._render_image()
+        self._update_button_states()
+    
+    def _draw_existing_roi_overlay(self):
+        s = self.current_stage
+        c = self.config_data
+        s_key = s.lower()
+
+        if s == "SETUP" and c["setup"]["game_region"]:
+            roi = c["setup"]["game_region"]
+            self._draw_rect(roi["left"], roi["top"], roi["left"] + roi["width"], roi["top"] + roi["height"], "#00FFFF", "GAME REGION")
+        elif s == "GAMEPLAY":
+            for name, color, label in [
+                ("fuel_roi", "#00FF00", "FUEL"), 
+                ("gas_roi", "#FFD700", "GAS"), 
+                ("brake_roi", "#FF4500", "BRAKE"),
+                ("distance_roi", "#00BFFF", "DISTANCE")
+                ]:
+                if name in self.current_gameplay_set:
+                    r = self.current_gameplay_set[name]
+                    self._draw_rect(r["x1"], r["y1"], r["x2"], r["y2"], color, label)
+        elif s_key == "menu" and c[s_key].get("start_button_roi"):
+            r = c[s_key]["start_button_roi"]
+            self._draw_rect(r["x1"], r["y1"], r["x2"], r["y2"], "#87CEEB", "START")
+        # SIMPLIFIED: Only draw the distance ROI on the game over screen.
+        elif s_key == "game_over":
+            if c[s_key].get("distance_meter_roi"):
+                r = c[s_key]["distance_meter_roi"]
+                self._draw_rect(r["x1"], r["y1"], r["x2"], r["y2"], "#9370DB", "DISTANCE")
+
+    def _on_release(self, event):
+        if not self.start_xy or self.current_img is None: return
+        x1c, y1c, x2c, y2c = *self.start_xy, event.x, event.y
+        x1c, x2c = sorted((x1c, x2c)); y1c, y2c = sorted((y1c, y2c))
+        x1, y1 = self._canvas_to_image((x1c, y1c)); x2, y2 = self._canvas_to_image((x2c, y2c))
+        if abs(x2 - x1) < 5 or abs(y2 - y1) < 5:
+            self._clear_temp_rect(); self.start_xy = None; return
+
+        roi = {"x1": x1, "y1": y1, "x2": x2, "y2": y2}
+        s = self.current_stage
+        
+        if s == "SETUP":
+            self.config_data["setup"]["game_region"] = {"left": x1, "top": y1, "width": x2 - x1, "height": y2 - y1}
+        elif s == "GAMEPLAY":
+            self.current_gameplay_set[f"{self.tool_var_gameplay.get()}_roi"] = roi
+        elif s == "MENU":
+            self.config_data["menu"]["start_button_roi"] = roi
+        # SIMPLIFIED: Only one possible annotation for game over.
+        elif s == "GAME_OVER":
+            self.config_data["game_over"]["distance_meter_roi"] = roi
+
+        self._clear_temp_rect(); self.start_xy = None
+        self._render_image(); self._update_button_states()
+
+    def _clear_current_roi(self):
+        s = self.current_stage
+        if s == "SETUP": self.config_data["setup"]["game_region"] = None
+        elif s == "GAMEPLAY":
+            self.current_gameplay_set.pop(f"{self.tool_var_gameplay.get()}_roi", None)
+        elif s == "MENU": self.config_data["menu"]["start_button_roi"] = None
+        # SIMPLIFIED: Only one ROI to clear.
+        elif s == "GAME_OVER":
+            self.config_data["game_over"]["distance_meter_roi"] = None
+        self._render_image(); self._update_button_states()
+
+    def _set_tool(self, tool):
+        if self.current_stage == "GAMEPLAY" and tool in self.GAMEPLAY_TOOLS:
+            self.tool_var_gameplay.set(tool)
+        self._on_tool_change()
+        
+    def _on_tool_change(self):
+        self._render_image()
+
+    # --- Methods below are unchanged ---
 
     def _capture_screen_with_monitor_picker(self):
         selector = MonitorSelector(self)
@@ -199,40 +302,6 @@ class MultiScreenAnnotator(tk.Tk):
         except Exception as e:
             messagebox.showerror("Error Loading Image", f"Could not load the file:\n{e}")
 
-    def _process_new_image(self, pil_image):
-        stage = self.current_stage
-        
-        if stage == "SETUP":
-            self.current_img = pil_image
-            self.config_data["setup"]["ref_img_b64"] = self._pil_to_b64(self.current_img)
-        else:
-            game_region = self.config_data["setup"]["game_region"]
-            if not game_region:
-                messagebox.showerror("Error", "Game region not set. Please complete the SETUP stage first.")
-                return
-            l, t, w, h = game_region["left"], game_region["top"], game_region["width"], game_region["height"]
-            
-            if pil_image.width < (l + w) or pil_image.height < (t + h):
-                messagebox.showwarning("Warning", "The loaded image is smaller than the defined game region.")
-            
-            cropped_img = pil_image.crop((l, t, l + w, t + h)).copy()
-            self.current_img = cropped_img
-            
-            b64_img = self._pil_to_b64(self.current_img)
-            
-            # --- FIX IS HERE ---
-            # Use lowercase stage name to match dictionary keys
-            stage_key = stage.lower()
-
-            if stage_key == "gameplay":
-                self.current_gameplay_set = {"ref_img_b64": b64_img}
-            elif stage_key in self.config_data:
-                # This now correctly handles "menu" and "game_over"
-                self.config_data[stage_key]["ref_img_b64"] = b64_img
-        
-        self._render_image()
-        self._update_button_states()
-
     def _render_image(self):
         self.canvas.delete("all")
         if self.current_img is None: return
@@ -247,66 +316,11 @@ class MultiScreenAnnotator(tk.Tk):
         self.canvas.create_image(self.offset, anchor="nw", image=self.current_tk_img)
         self._draw_existing_roi_overlay()
 
-    def _draw_existing_roi_overlay(self):
-        s = self.current_stage
-        c = self.config_data
-        s_key = s.lower()
-
-        if s == "SETUP" and c["setup"]["game_region"]:
-            roi = c["setup"]["game_region"]
-            self._draw_rect(roi["left"], roi["top"], roi["left"] + roi["width"], roi["top"] + roi["height"], "#00FFFF", "GAME REGION")
-        elif s == "GAMEPLAY":
-            for name, color, label in [("fuel_roi", "#00FF00", "FUEL"), ("gas_roi", "#FFD700", "GAS"), ("brake_roi", "#FF4500", "BRAKE")]:
-                if name in self.current_gameplay_set:
-                    r = self.current_gameplay_set[name]
-                    self._draw_rect(r["x1"], r["y1"], r["x2"], r["y2"], color, label)
-        elif s_key == "menu" and c[s_key]["start_button_roi"]:
-            r = c[s_key]["start_button_roi"]
-            self._draw_rect(r["x1"], r["y1"], r["x2"], r["y2"], "#87CEEB", "START")
-        elif s_key == "game_over" and c[s_key]["restart_area_roi"]:
-            r = c[s_key]["restart_area_roi"]
-            self._draw_rect(r["x1"], r["y1"], r["x2"], r["y2"], "#FF69B4", "RESTART")
-
     def _draw_rect(self, x1, y1, x2, y2, color, label):
         sx1, sy1 = self._image_to_canvas(x1, y1)
         sx2, sy2 = self._image_to_canvas(x2, y2)
         self.canvas.create_rectangle(sx1, sy1, sx2, sy2, outline=color, width=2, dash=(4, 4))
         self.canvas.create_text(sx1 + 5, sy1 + 5, text=label, fill=color, anchor="nw", font=("Segoe UI", 10, "bold"))
-
-    def _on_release(self, event):
-        if not self.start_xy or self.current_img is None: return
-        x1c, y1c, x2c, y2c = *self.start_xy, event.x, event.y
-        x1c, x2c = sorted((x1c, x2c))
-        y1c, y2c = sorted((y1c, y2c))
-        x1, y1 = self._canvas_to_image((x1c, y1c))
-        x2, y2 = self._canvas_to_image((x2c, y2c))
-        if abs(x2 - x1) < 5 or abs(y2 - y1) < 5:
-            self._clear_temp_rect(); self.start_xy = None; return
-
-        roi = {"x1": x1, "y1": y1, "x2": x2, "y2": y2}
-        s = self.current_stage
-        
-        if s == "SETUP":
-            self.config_data["setup"]["game_region"] = {"left": x1, "top": y1, "width": x2 - x1, "height": y2 - y1}
-        elif s == "GAMEPLAY":
-            self.current_gameplay_set[f"{self.tool_var.get()}_roi"] = roi
-        elif s == "MENU":
-            self.config_data["menu"]["start_button_roi"] = roi
-        elif s == "GAME_OVER":
-            self.config_data["game_over"]["restart_area_roi"] = roi
-
-        self._clear_temp_rect(); self.start_xy = None
-        self._render_image()
-        self._update_button_states()
-
-    def _clear_current_roi(self):
-        s = self.current_stage
-        if s == "SETUP": self.config_data["setup"]["game_region"] = None
-        elif s == "GAMEPLAY": self.current_gameplay_set.pop(f"{self.tool_var.get()}_roi", None)
-        elif s == "MENU": self.config_data["menu"]["start_button_roi"] = None
-        elif s == "GAME_OVER": self.config_data["game_over"]["restart_area_roi"] = None
-        self._render_image()
-        self._update_button_states()
 
     def _save_current_gameplay_set(self):
         if self.current_stage != "GAMEPLAY": return
@@ -350,15 +364,6 @@ class MultiScreenAnnotator(tk.Tk):
         if self.canvas_rect_id: self.canvas.delete(self.canvas_rect_id)
         self.canvas_rect_id = None
         
-    def _on_tool_change(self):
-        self.active_tool = self.tool_var.get()
-        self._render_image()
-
-    def _set_tool(self, tool):
-        if self.current_stage == "GAMEPLAY":
-            self.tool_var.set(tool)
-            self._on_tool_change()
-
     def _pil_to_b64(self, pil_image):
         buf = io.BytesIO()
         pil_image.save(buf, format="PNG")
@@ -376,3 +381,4 @@ class MultiScreenAnnotator(tk.Tk):
 if __name__ == "__main__":
     app = MultiScreenAnnotator()
     app.mainloop()
+
