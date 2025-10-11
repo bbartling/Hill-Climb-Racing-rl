@@ -14,5 +14,6 @@ Hobby project to play around with reinforcement learning to see if it can play c
 
 Install Python packages:
 ```bash
-pip install pyautogui mss opencv-python numpy scikit-image Pillow easyocr
+pip install pyautogui mss opencv-python numpy scikit-image Pillow easyocr keyboard
 ```
+* Hit `q` on keyboard to quit
