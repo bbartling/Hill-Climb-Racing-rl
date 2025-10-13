@@ -4,6 +4,7 @@ A fun hobby project exploring **computer vision**, **imitation learning**, and e
 
 ![Gameplay Screenshot](https://github.com/bbartling/Hill-Climb-Racing-rl/blob/develop/snip.png)
 
+https://drive.google.com/file/d/162kejk2QqyGb1krAq7rsnFM0XDiPQKWC/view?usp=sharing
 ---
 
 ## 🎯 Overview
@@ -16,6 +17,20 @@ The workflow is divided into stages:
 2. **Record** human gameplay data (state + actions).
 3. **Train** a neural network via **behavioral cloning** (imitation learning).
 4. **(TODO)** Extend to full **reinforcement learning (RL)** using the trained model as a baseline.
+
+### Video processing and testing of computer vision
+
+The script detects the jeep by isolating red hues in the image using HSV color thresholds, then finds the largest red contour that represents the jeep’s body. It fits a minimum-area rectangle around that contour to determine the jeep’s rotation and computes the angle based on the rectangle’s orientation. The centroid of that red contour serves as the reference point for height calculation. From the centroid, the script scans straight downward until it encounters pixels matching ground colors (green or brown), marking that spot as the contact point. The vertical distance in pixels between the centroid and this ground boundary is labeled on the image as the jeep’s height above ground.
+
+```bash
+$env:HCR_VIDEO = "C:\Users\ben\Videos\HCR.mp4"
+
+
+python video_jeep_angle_and_height_testing.py
+
+```
+
+[![Watch gameplay on Bens Drive](https://img.youtube.com/vi/dQw4w9WgXcQ/0.jpg)](https://drive.google.com/file/d/162kejk2QqyGb1krAq7rsnFM0XDiPQKWC/view?usp=sharing)
 
 ---
 
