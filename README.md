@@ -2,7 +2,7 @@
 
 A fun hobby project exploring **computer vision**, **imitation learning**, and eventually **reinforcement learning (RL)** — teaching an AI to play the classic *Hill Climb Racing* game.
 
-![Gameplay Screenshot](https://github.com/bbartling/Hill-Climb-Racing-rl/blob/develop/config_screenshots/images_for_cv/0_deg_normal_out.png)
+![Gameplay Screenshot](https://github.com/bbartling/Hill-Climb-Racing-rl/blob/develop/snip.png)
 
 ---
 

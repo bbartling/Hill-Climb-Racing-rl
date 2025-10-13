@@ -54,34 +54,31 @@ def annotate_with_direction_line(image_bgr: np.ndarray):
     return annotated, angle
 
 def main():
-    ap = argparse.ArgumentParser(description="Detect jeep angle and draw direction line")
-    ap.add_argument("input", help="Path to input image (or 0 for webcam)")
-    ap.add_argument("-o", "--output", help="Save annotated image/video to this path")
-    args = ap.parse_args()
+    input_dir = Path("config_screenshots/images_for_cv")
+    output_dir = Path("processed_images_cv")
+    output_dir.mkdir(parents=True, exist_ok=True)
 
-    if args.input == "0":
-        cap = cv2.VideoCapture(0)
-        if not cap.isOpened():
-            sys.exit("Could not open webcam.")
-        while True:
-            ok, frame = cap.read()
-            if not ok: break
-            annotated, angle = annotate_with_direction_line(frame)
-            cv2.imshow("Jeep Angle", annotated)
-            if cv2.waitKey(1) & 0xFF == 27:  # ESC to quit
-                break
-        cap.release()
-        cv2.destroyAllWindows()
-    else:
-        img = cv2.imread(args.input)
+    image_extensions = [".png", ".jpg", ".jpeg", ".bmp"]
+    image_files = [f for f in input_dir.iterdir() if f.suffix.lower() in image_extensions]
+
+    if not image_files:
+        print(f"No image files found in {input_dir}")
+        return
+
+    for img_path in image_files:
+        print(f"Processing {img_path.name} ...")
+        img = cv2.imread(str(img_path))
         if img is None:
-            sys.exit(f"Could not read {args.input}")
+            print(f"⚠️ Skipping {img_path.name} (unable to read)")
+            continue
+
         annotated, angle = annotate_with_direction_line(img)
-        print(f"Angle (deg): {angle}")
-        if args.output:
-            cv2.imwrite(args.output, annotated)
-        cv2.imshow("Jeep Angle", annotated)
-        cv2.waitKey(0)
+        out_path = output_dir / f"{img_path.stem}_processed{img_path.suffix}"
+        cv2.imwrite(str(out_path), annotated)
+        print(f"✅ Saved {out_path.name} | Angle = {angle}")
+
+    print("\nAll images processed.")
+
 
 if __name__ == "__main__":
     main()
