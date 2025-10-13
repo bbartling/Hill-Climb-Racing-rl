@@ -2,9 +2,8 @@
 
 A fun hobby project exploring **computer vision**, **imitation learning**, and eventually **reinforcement learning (RL)** — teaching an AI to play the classic *Hill Climb Racing* game.
 
-![Gameplay Screenshot](https://github.com/bbartling/Hill-Climb-Racing-rl/blob/develop/snip.png)
+[![Gameplay Screenshot](https://github.com/bbartling/Hill-Climb-Racing-rl/blob/develop/snip.png)](https://drive.google.com/file/d/162kejk2QqyGb1krAq7rsnFM0XDiPQKWC/view?usp=sharing)
 
-https://drive.google.com/file/d/162kejk2QqyGb1krAq7rsnFM0XDiPQKWC/view?usp=sharing
 ---
 
 ## 🎯 Overview
@@ -30,7 +29,6 @@ python video_jeep_angle_and_height_testing.py
 
 ```
 
-[![Watch gameplay on Bens Drive](https://img.youtube.com/vi/dQw4w9WgXcQ/0.jpg)](https://drive.google.com/file/d/162kejk2QqyGb1krAq7rsnFM0XDiPQKWC/view?usp=sharing)
 
 ---
 
