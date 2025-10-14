@@ -1,178 +1,54 @@
 # 🏎️ Hill-Climb-Racing-RL
 
-A fun hobby project exploring **computer vision**, **imitation learning**, and eventually **reinforcement learning (RL)** — teaching an AI to play the classic *Hill Climb Racing* game.
+A fun hobby project exploring **computer vision**, **imitation learning**, and eventually **reinforcement learning (RL)** — teaching an AI to play the classic *Hill Climb Racing* game. Click on the image below to go to a Google drive video capture of game play with computer vision processing to calculate the jeeps angle and hieght.
 
 [![Gameplay Screenshot](https://github.com/bbartling/Hill-Climb-Racing-rl/blob/develop/snip.png)](https://drive.google.com/file/d/162kejk2QqyGb1krAq7rsnFM0XDiPQKWC/view?usp=sharing)
 
 ---
 
-## 🎯 Overview
-
-This project aims to build an AI that learns to drive like a human in *Hill Climb Racing*.
-
-The workflow is divided into stages:
-
-1. **Annotate** the game’s regions of interest (fuel bar, gas/brake pedals, etc.).
-2. **Record** human gameplay data (state + actions).
-3. **Train** a neural network via **behavioral cloning** (imitation learning).
-4. **(TODO)** Extend to full **reinforcement learning (RL)** using the trained model as a baseline.
-
-### Video processing and testing of computer vision
-
-The script detects the jeep by isolating red hues in the image using HSV color thresholds, then finds the largest red contour that represents the jeep’s body. It fits a minimum-area rectangle around that contour to determine the jeep’s rotation and computes the angle based on the rectangle’s orientation. The centroid of that red contour serves as the reference point for height calculation. From the centroid, the script scans straight downward until it encounters pixels matching ground colors (green or brown), marking that spot as the contact point. The vertical distance in pixels between the centroid and this ground boundary is labeled on the image as the jeep’s height above ground.
-
-```bash
-$env:HCR_VIDEO = "C:\Users\ben\Videos\HCR.mp4"
-
-
-python video_jeep_angle_and_height_testing.py
-
-```
-
-
----
-
 ## 🧩 Getting Started
 
-### Requirements
-
-* **OS:** Windows 10 or 11
+* **OS:** Tested on Windows 10 or 11. Should work fine on Mac as well.
 * **Python:** 3.12.x
 * **Game:** *Hill Climb Racing* from the Microsoft Store
 * **Terminal:** Windows Terminal App (for PowerShell commands)
 
-### Installation
-
-Install dependencies:
-
+Python packages:
 ```bash
 pip install pyautogui mss opencv-python numpy scikit-image Pillow easyocr keyboard
 ```
-
-> Press **`q`** anytime in a capture window to quit safely.
-
 ---
 
-## 🖼️ Step 1 — Annotate the Game Screen
+## Computer Vision Testing
 
-Run the annotator to define key regions of interest:
+This project aims to build an AI that learns to drive like a human in *Hill Climb Racing* but first the AI needs to see data in the game.
 
+### Test computer vision on still image screenshot of game play
 ```bash
-python hcr_annotator.py
+python main.py --images-in config_screenshots/images_for_cv --images-out config_screenshots/procressed_images --csv images_stats.csv
 ```
 
-You’ll:
-
-* Capture or load screenshots of your monitor.
-* Draw rectangles around UI elements like the **fuel bar**, **pedals**, and **distance meter**.
-* Save the configuration as `hcr_config.json`.
-
-This step ensures consistent cropping and analysis across scripts.
-
----
-
-## 🎮 Step 2 — Record Human Gameplay
-
-Once your config is ready, record human gameplay with:
-
+### Test computer vision on recorded video file of game play
 ```bash
-python record_manual_play.py
+python main.py --video-in "C:/Users/ben/Videos/HCR/HCR_raw.mp4" --video-out "C:/Users/ben/Videos/HCR/HCR_processed.mp4" --csv "C:/Users/ben/Videos/HCR/video_stats.csv"
 ```
 
-This script:
-
-* Captures screen frames from the defined game region.
-* Detects the jeep’s angle in real time.
-* Logs your keyboard input (`←` brake, `→` gas).
-* Saves data to a CSV file:
-
-| timestamp    | angle | gas_pressed | brake_pressed |
-| ------------ | ----- | ----------- | ------------- |
-| 1697051887.1 | 78.6  | 1           | 0             |
-
-Use:
-
+### Record data set for NN
 ```bash
-python record_manual_play.py --no-display
+# Example region (LEFT TOP WIDTH HEIGHT). Adjust to your monitor/game window.
+python main.py --record --region 68 35 1235 687 --csv manual_play_data.csv --fps 30
 ```
-
-for **headless mode** (no preview window).
-
----
-
-## 🧠 Step 3 — Train an Imitation Learning Model (TODO)
-
-With `manual_play_data.csv` ready, the next step is to train a simple neural network that mimics your driving:
-
-### Concept — *Behavioral Cloning*
-
-The model learns to map observed **game states** to **player actions**.
-
-* **Input (X):** Jeep angle (and potentially more features later)
-* **Output (y):** Player action
-
-  * `0 = coast`, `1 = gas`, `2 = brake`
-
-### Example Workflow
-
-1. Load CSV data with `pandas`.
-2. Split into `train/test` datasets.
-3. Train a small neural net using **TensorFlow/Keras** or **PyTorch**:
-
-   ```python
-   model.fit(X_train, y_train, epochs=20, batch_size=64)
-   ```
-4. Use the trained model in a script that plays automatically:
-
-   ```python
-   action = model.predict(current_angle)
-   ```
+* Press s to start, q to quit.
+* Default keys: right arrow = gas, left arrow = brake
+* Add --no-display for headless environments
 
 ---
 
-## 🚀 Step 4 — Reinforcement Learning (Future Work)
-
-Planned future enhancement:
-
-* Replace the imitation policy with an **RL agent**.
-* Use rewards for fuel efficiency, distance traveled, and airtime stability.
-* Explore **Deep Q-Learning (DQN)** or **PPO** frameworks.
-
----
-
-## 🧭 Current Status
-
-| Component               | Status                           |
-| ----------------------- | -------------------------------- |
-| `hcr_annotator.py`      | ✅ Fully functional               |
-| `record_manual_play.py` | ✅ Recording human gameplay works |
-| `manual_play_data.csv`  | ✅ Generates training data        |
-| Imitation Learning NN   | ⏳ Next task                      |
-| RL Agent                | 🧠 Future TODO                   |
-
----
-
-## 💡 Notes
-
-* This is a local, offline experimentation project — no network or cloud dependencies.
-* Run each script directly in PowerShell or VS Code’s terminal.
-* Data files (`.json`, `.csv`) are written in the same directory.
-
----
-
-## 🏁 Roadmap
-
-| Stage | Description                             | Status |
-| ----- | --------------------------------------- | ------ |
-| 1     | Build screen annotation tool            | ✅      |
-| 2     | Record human gameplay dataset           | ✅      |
-| 3     | Train imitation learning NN             | 🔜     |
-| 4     | Add reinforcement learning agent        | 🚧     |
-| 5     | Visualize performance & learning curves | 🚧     |
+## Train NN in Pytorch for imitation learning
+TODO
 
 ---
 
 ## 📜 License
-
 MIT License © 2025 Ben Bartling
 
