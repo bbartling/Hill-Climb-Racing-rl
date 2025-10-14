@@ -54,6 +54,14 @@ python main.py --record --region 68 35 1235 687 --csv manual_play_data.csv --fps
 * Default keys for HCR: right arrow = gas peddle, left arrow = brake peddle
 * Add --no-display for headless environments
 
+The arg for `--csv manual_play_data.csv` is built in **record mode** saves training data for a neural network. Each row looks like this:
+
+```sql
+| timestamp    | angle | height_px | gas_pressed | brake_pressed |
+| ------------ | ----- | --------- | ----------- | ------------- |
+| 1697051887.1 | 78.6  | 120.0     | 1           | 0             |
+```
+
 ---
 
 ## Train NN in Pytorch for imitation learning
