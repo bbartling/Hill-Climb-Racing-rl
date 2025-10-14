@@ -14,7 +14,7 @@ A fun hobby project exploring **computer vision**, **imitation learning**, and e
 * **Terminal:** Windows Terminal App (for PowerShell commands)
 
 Python packages:
-```bash
+```powershell
 pip install pyautogui mss opencv-python numpy scikit-image Pillow easyocr keyboard
 ```
 ---
@@ -24,20 +24,32 @@ pip install pyautogui mss opencv-python numpy scikit-image Pillow easyocr keyboa
 This project aims to build an AI that learns to drive like a human in *Hill Climb Racing* but first the AI needs to see data in the game.
 
 ### Test computer vision on still image screenshot of game play
-```bash
+```powershell
 python main.py --images-in config_screenshots/images_for_cv --images-out config_screenshots/procressed_images --csv images_stats.csv
 ```
 
 ### Test computer vision on recorded video file of game play
-```bash
+```powershell
 python main.py --video-in "C:/Users/ben/Videos/HCR/HCR_raw.mp4" --video-out "C:/Users/ben/Videos/HCR/HCR_processed.mp4" --csv "C:/Users/ben/Videos/HCR/video_stats.csv"
 ```
 
 ### Record data set for NN
-```bash
-# Example region (LEFT TOP WIDTH HEIGHT). Adjust to your monitor/game window.
+First ensure that the coordinates `--region` is setup correctly.
+```powershell
+python main.py --preview-region --region 68 35 1235 687
+```
+Keep dialing that in region (LEFT TOP WIDTH HEIGHT) to adjust to your monitor/game window.
+
+```powershell
+# with region dialed in
 python main.py --record --region 68 35 1235 687 --csv manual_play_data.csv --fps 30
 ```
+
+Record with video output
+```powershell
+python main.py --record --region 68 35 1235 687 --csv manual_play_data.csv --fps 30 --record-video-out "C:/Users/ben/Videos/HCR/gameplay_annotated.mp4"
+```
+
 * Press s to start, q to quit.
 * Default keys: right arrow = gas, left arrow = brake
 * Add --no-display for headless environments
@@ -45,7 +57,12 @@ python main.py --record --region 68 35 1235 687 --csv manual_play_data.csv --fps
 ---
 
 ## Train NN in Pytorch for imitation learning
-TODO
+* TODO
+
+---
+
+## RL with Stable Baselines3
+* TODO
 
 ---
 
