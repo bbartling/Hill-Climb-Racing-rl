@@ -8,14 +8,15 @@ A fun hobby project exploring **computer vision**, **imitation learning**, and e
 
 ## 🧩 Getting Started
 
-* **OS:** Tested on Windows 10 or 11. Should work fine on Mac as well.
+* **OS:** Tested on Windows 10 and 11 should also work fine in Macintosh world
 * **Python:** 3.12.x
 * **Game:** *Hill Climb Racing* from the Microsoft Store
-* **Terminal:** Windows Terminal App (for PowerShell commands)
+* **Terminal:** Windows Terminal App (for PowerShell commands) from the Microsoft Store
 
 Python packages:
 ```powershell
-pip install pyautogui mss opencv-python numpy scikit-image Pillow easyocr keyboard
+pip install pyautogui mss opencv-python numpy scikit-image Pillow easyocr keyboard pandas torch scikit-learn matplotlib seaborn
+
 ```
 ---
 
@@ -42,12 +43,12 @@ Keep dialing that in region (LEFT TOP WIDTH HEIGHT) to adjust to your monitor/ga
 
 #### Record game play with region of game screen dialed in
 ```powershell
-python main.py --record --region 68 35 1235 687 --csv manual_play_data.csv --fps 30
+python main.py --record --region 68 35 1800 1200 --csv manual_play_data.csv --fps 30
 ```
 
 Optional game play record with `--record-video-out` added.
 ```powershell
-python main.py --record --region 68 35 1235 687 --csv manual_play_data.csv --fps 30 --record-video-out "C:/Users/ben/Videos/HCR/gameplay_annotated.mp4"
+python main.py --record --region 68 35 1800 1200 --csv manual_play_data.csv --fps 30 --record-video-out "C:/Users/ben/Videos/HCR/gameplay_annotated.mp4"
 ```
 
 * Press s to start, q to quit.
@@ -64,8 +65,15 @@ The arg for `--csv manual_play_data.csv` is built in **record mode** saves train
 
 ---
 
+## Analyze data from manual game play
+```powershell
+python .\analyze_gamplay_data.py .\manual_play_data.csv
+```
+
 ## Train NN in Pytorch for imitation learning
-* TODO
+```powershell
+python .\train_hcr_classifier.py manual_play_data.csv
+```
 
 ---
 

@@ -30,7 +30,30 @@ manual_play_data.csv
 *.csv
 
 hcr_config.json
-*.json
+
+# ML artifacts and model outputs
+*.pkl
+*.pickle
+*.pth
+*.pt
+*.onnx
+
+# Training and analysis output folders
+ml_training_loss_plots/
+game_play_data_analysis/
+
+# Logs and temporary files
+*.log
+*.tmp
+*.csv~
+*.bak
+
+# Python cache / temp
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
 
 # PyInstaller
 #  Usually these files are written by a python script from a template
