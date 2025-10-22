@@ -26,7 +26,7 @@ This project aims to build an AI that learns to drive like a human in *Hill Clim
 
 #### Test computer vision on still image screenshot of game play
 ```powershell
-python main.py --images-in config_screenshots/images_for_cv --images-out config_screenshots/procressed_images --csv images_stats.csv
+python main.py --images-in "C:\Users\ben\Videos\HCR\images_for_cv" --images-out "C:\Users\ben\Videos\HCR\processed_images" --csv "C:\Users\ben\Videos\HCR\images_stats.csv"
 ```
 
 #### Test computer vision on recorded video file of game play

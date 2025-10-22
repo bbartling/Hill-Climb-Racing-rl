@@ -16,7 +16,8 @@ except Exception:
     keyboard = None
     mss = None
 
-from utils_cv import annotate_frame  # local util file
+# Now imports the augmented function
+from utils_cv import annotate_frame
 
 
 # -----------------------------
@@ -35,12 +36,14 @@ def process_images(input_dir: Path, output_dir: Path, csv_path: Path | None):
     if csv_path:
         csv_file = open(csv_path, "w", newline="", encoding="utf-8")
         writer = csv.writer(csv_file)
+        # Added 'ground_slope' and renamed 'jeep_angle'
         writer.writerow(
             [
                 "timestamp",
                 "source",
-                "angle",
+                "jeep_angle",
                 "height_px",
+                "ground_slope",
                 "gas_pressed",
                 "brake_pressed",
             ]
@@ -51,18 +54,25 @@ def process_images(input_dir: Path, output_dir: Path, csv_path: Path | None):
         if img is None:
             print(f"⚠️ Skipping unreadable image: {p.name}")
             continue
-        annotated, angle, height_px = annotate_frame(img)
+
+        # Now receives 4 values
+        annotated, jeep_angle, height_px, ground_slope = annotate_frame(img)
+
         out = output_dir / f"{p.stem}_processed{p.suffix}"
         cv2.imwrite(str(out), annotated)
-        print(f"✅ Saved {out.name} | angle={angle} | height_px={height_px}")
+        print(
+            f"✅ Saved {out.name} | angle={jeep_angle} | height_px={height_px} | slope={ground_slope}"
+        )
 
         if writer:
+            # Write all new values
             writer.writerow(
                 [
                     time.time(),
                     p.name,
-                    angle if angle is not None else "",
+                    jeep_angle if jeep_angle is not None else "",
                     height_px if height_px is not None else "",
+                    ground_slope if ground_slope is not None else "",
                     0,
                     0,
                 ]
@@ -93,7 +103,6 @@ def process_video(video_in: Path, video_out: Path | None, csv_path: Path | None)
     if video_out is None:
         video_out = video_in.with_name(f"{video_in.stem}_processed.mp4")
 
-    # Try mp4v first; if it ever fails on your system, swap to 'avc1' or 'XVID' (.avi)
     fourcc = cv2.VideoWriter_fourcc(*"mp4v")
     writer_v = cv2.VideoWriter(str(video_out), fourcc, fps, (w, h))
     if not writer_v.isOpened():
@@ -105,12 +114,14 @@ def process_video(video_in: Path, video_out: Path | None, csv_path: Path | None)
     if csv_path:
         csv_file = open(csv_path, "w", newline="", encoding="utf-8")
         writer_c = csv.writer(csv_file)
+        # Added 'ground_slope' and renamed 'jeep_angle'
         writer_c.writerow(
             [
                 "timestamp_s",
                 "frame_idx",
-                "angle",
+                "jeep_angle",
                 "height_px",
+                "ground_slope",
                 "gas_pressed",
                 "brake_pressed",
             ]
@@ -120,15 +131,18 @@ def process_video(video_in: Path, video_out: Path | None, csv_path: Path | None)
 
     # Process the already-read first frame
     i = 0
-    annotated, angle, height_px = annotate_frame(frame)
+    # Now receives 4 values
+    annotated, jeep_angle, height_px, ground_slope = annotate_frame(frame)
     writer_v.write(annotated)
     if writer_c:
+        # Write all new values
         writer_c.writerow(
             [
                 f"{i / fps:.3f}",
                 i,
-                angle if angle is not None else "",
+                jeep_angle if jeep_angle is not None else "",
                 height_px if height_px is not None else "",
+                ground_slope if ground_slope is not None else "",
                 0,
                 0,
             ]
@@ -140,15 +154,20 @@ def process_video(video_in: Path, video_out: Path | None, csv_path: Path | None)
         ok, frame = cap.read()
         if not ok:
             break
-        annotated, angle, height_px = annotate_frame(frame)
+
+        # Now receives 4 values
+        annotated, jeep_angle, height_px, ground_slope = annotate_frame(frame)
         writer_v.write(annotated)
+
         if writer_c:
+            # Write all new values
             writer_c.writerow(
                 [
                     f"{i / fps:.3f}",
                     i,
-                    angle if angle is not None else "",
+                    jeep_angle if jeep_angle is not None else "",
                     height_px if height_px is not None else "",
+                    ground_slope if ground_slope is not None else "",
                     0,
                     0,
                 ]
@@ -186,8 +205,16 @@ def record_mode(
     csv_file = open(csv_path, "a", newline="", encoding="utf-8")
     writer = csv.writer(csv_file)
     if not file_exists:
+        # Added 'ground_slope' and renamed 'jeep_angle'
         writer.writerow(
-            ["timestamp", "angle", "height_px", "gas_pressed", "brake_pressed"]
+            [
+                "timestamp",
+                "jeep_angle",
+                "height_px",
+                "ground_slope",
+                "gas_pressed",
+                "brake_pressed",
+            ]
         )
 
     delay_ms = int(1000 / max(1.0, fps))
@@ -202,7 +229,9 @@ def record_mode(
 
                 sct_img = sct.grab(game_region)
                 frame = cv2.cvtColor(np.array(sct_img), cv2.COLOR_BGRA2BGR)
-                annotated, angle, height_px = annotate_frame(frame)
+
+                # Now receives 4 values
+                annotated, jeep_angle, height_px, ground_slope = annotate_frame(frame)
 
                 if video_out:
                     if writer_v is None:
@@ -222,11 +251,13 @@ def record_mode(
                 gas = 1 if keyboard.is_pressed("right") else 0
                 brake = 1 if keyboard.is_pressed("left") else 0
 
+                # Write all new values
                 writer.writerow(
                     [
                         time.time(),
-                        angle if angle is not None else "",
+                        jeep_angle if jeep_angle is not None else "",
                         height_px if height_px is not None else "",
+                        ground_slope if ground_slope is not None else "",
                         gas,
                         brake,
                     ]
@@ -263,6 +294,7 @@ def record_mode(
 
 # -----------------------------
 # Region utilities
+# (This section is your existing code, unchanged)
 # -----------------------------
 def preview_region(region: dict):
     """Grab one frame of the specified region and display it once."""
@@ -342,6 +374,7 @@ def select_region_interactive(save_to: Path | None = None):
 
 # -----------------------------
 # CLI
+# (This section is your existing code, unchanged)
 # -----------------------------
 def parse_args():
     p = argparse.ArgumentParser(
