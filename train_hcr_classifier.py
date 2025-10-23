@@ -1,3 +1,4 @@
+# train_hcr_classifier.py
 import argparse
 import json
 import pickle
@@ -32,12 +33,26 @@ def ensure_dir(path: Path):
 def load_hcr_csv(csv_path: Path):
     df = pd.read_csv(csv_path)
     df.replace("", pd.NA, inplace=True)
-    df.dropna(subset=["angle", "height_px"], inplace=True)
-    X = df[["angle", "height_px"]].values.astype(np.float32)
+
+    # Ensure required numerics
+    for col in ["angle", "height_px", "ground_slope", "gas_pressed", "brake_pressed"]:
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors="coerce")
+
+    # Choose features dynamically (prefer 3 if slope exists)
+    feat_cols = ["angle", "height_px"]
+    if "ground_slope" in df.columns:
+        feat_cols.append("ground_slope")
+
+    df.dropna(subset=feat_cols, inplace=True)
+
+    X = df[feat_cols].values.astype(np.float32)
     y = np.select(
-        [(df["gas_pressed"] == 1), (df["brake_pressed"] == 1)], [1, 2], default=0
+        [(df.get("gas_pressed", 0) == 1), (df.get("brake_pressed", 0) == 1)],
+        [1, 2],
+        default=0,
     ).astype(np.int64)
-    return X, y
+    return X, y, feat_cols
 
 
 class HCRDataset(Dataset):
@@ -93,7 +108,10 @@ def train(
     curves_path = out_dir / "training_curves.png"
     summary_path = out_dir / "summary.json"
 
-    X, y = load_hcr_csv(csv_path)
+    X, y, feat_cols = load_hcr_csv(csv_path)
+    input_size = X.shape[1]
+    print(f"Feature columns: {feat_cols} (input_size={input_size})")
+
     if len(X) < 10:
         raise SystemExit("Not enough samples to train. Collect more gameplay.")
 
@@ -114,7 +132,7 @@ def train(
     train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True)
     val_loader = DataLoader(val_ds, batch_size=batch_size, shuffle=False)
 
-    model = HCRModel().to(device)
+    model = HCRModel(input_size=input_size).to(device)
 
     classes, counts = np.unique(y_train, return_counts=True)
     freq = counts / counts.sum()
@@ -130,6 +148,7 @@ def train(
 
     history = {"train_loss": [], "val_loss": [], "val_accuracy": []}
 
+    # Baseline with same feature set (scaled)
     logit = LogisticRegression(max_iter=500, class_weight="balanced").fit(
         X_train, y_train
     )
@@ -255,6 +274,7 @@ def train(
         "samples_val": int(len(X_val)),
         "best_val_loss": float(best_val_loss),
         "baseline_logreg_val_acc": float(baseline_acc),
+        "features": feat_cols,
         "paths": {
             "best_model": str(best_model_path),
             "scaler": str(scaler_path),
@@ -270,10 +290,10 @@ def train(
 
 def parse_args():
     p = argparse.ArgumentParser(
-        description="Train a 3-class action classifier from HCR CSV (angle, height)."
+        description="Train a 3-class action classifier from HCR CSV (angle, height, optional ground_slope)."
     )
     p.add_argument("csv_file", type=Path, help="Path to manual_play_data.csv")
-    p.add_argument("--epochs", type=int, default=50, help="Number of training epochs")
+    p.add_argument("--epochs", type=int, default=500, help="Number of training epochs")
     p.add_argument("--lr", type=float, default=1e-3, help="Learning rate")
     p.add_argument("--batch-size", type=int, default=32, help="Batch size")
     p.add_argument(

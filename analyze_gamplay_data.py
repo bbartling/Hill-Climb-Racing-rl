@@ -18,9 +18,18 @@ def analyze_gameplay_data(csv_path: Path, show: bool = True):
     print(f"Loading data from {csv_path}...")
     df = pd.read_csv(csv_path)
     df.replace("", pd.NA, inplace=True)
-    df["angle"] = pd.to_numeric(df["angle"], errors="coerce")
-    df["height_px"] = pd.to_numeric(df["height_px"], errors="coerce")
-    df.dropna(subset=["angle", "height_px"], inplace=True)
+
+    # Coerce numerics (now includes ground_slope)
+    for col in ["angle", "height_px", "ground_slope", "gas_pressed", "brake_pressed"]:
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors="coerce")
+
+    # Require slope if present; otherwise fall back gracefully
+    subset_cols = ["angle", "height_px"]
+    if "ground_slope" in df.columns:
+        subset_cols.append("ground_slope")
+
+    df.dropna(subset=subset_cols, inplace=True)
 
     if df.empty:
         print("No valid rows after cleaning — check your CSV.")
@@ -29,7 +38,7 @@ def analyze_gameplay_data(csv_path: Path, show: bool = True):
     # Action label: 0=Coast, 1=Gas, 2=Brake (kept as strings for plotting)
     df["action"] = pd.Categorical(
         np.select(
-            [df["gas_pressed"] == 1, df["brake_pressed"] == 1],
+            [df.get("gas_pressed", 0) == 1, df.get("brake_pressed", 0) == 1],
             ["Gas", "Brake"],
             default="Coast",
         )
@@ -48,18 +57,33 @@ def analyze_gameplay_data(csv_path: Path, show: bool = True):
     plt.style.use("seaborn-v0_8-whitegrid")
 
     # ---------- Pairplot ----------
+    pair_vars = ["angle", "height_px"]
+    if "ground_slope" in df.columns:
+        pair_vars.append("ground_slope")
+
     g = sns.pairplot(
-        df, vars=["angle", "height_px"], hue="action", diag_kind="kde", corner=True
+        df, vars=pair_vars, hue="action", diag_kind="kde", corner=True
     )
-    g.figure.suptitle("Gameplay Analysis: Angle & Height by Action", y=1.02)
+    title = "Gameplay Analysis: " + ", ".join(v.title().replace("_", " ") for v in pair_vars) + " by Action"
+    g.figure.suptitle(title, y=1.02)
     g.figure.savefig(
-        out_dir / "pairplot_angle_height_by_action.png", dpi=300, bbox_inches="tight"
+        out_dir / f"pairplot_{'_'.join(pair_vars)}_by_action.png",
+        dpi=300,
+        bbox_inches="tight",
     )
     plt.close(g.figure)
 
     # ---------- Correlation heatmap ----------
     fig_hm, ax_hm = plt.subplots(figsize=(6, 4))
-    corr = df[["angle", "height_px", "gas_pressed", "brake_pressed"]].corr()
+    corr_cols = ["angle", "height_px"]
+    if "ground_slope" in df.columns:
+        corr_cols.append("ground_slope")
+    # Controls if present
+    for c in ["gas_pressed", "brake_pressed"]:
+        if c in df.columns:
+            corr_cols.append(c)
+
+    corr = df[corr_cols].corr()
     sns.heatmap(corr, annot=True, cmap="coolwarm", fmt=".2f", ax=ax_hm)
     ax_hm.set_title("Correlation Heatmap: Features vs Controls")
     fig_hm.tight_layout()
@@ -82,13 +106,29 @@ def analyze_gameplay_data(csv_path: Path, show: bool = True):
     )
     plt.close(j.figure)
 
+    # Optional: joint density (angle vs ground_slope), only if available
+    if "ground_slope" in df.columns:
+        j2 = sns.jointplot(
+            data=df,
+            x="angle",
+            y="ground_slope",
+            hue="action",
+            kind="kde",
+            fill=True,
+            alpha=0.5,
+        )
+        j2.figure.suptitle("Angle vs Ground Slope Density by Action", y=1.03)
+        j2.figure.savefig(
+            out_dir / "joint_density_angle_vs_ground_slope.png",
+            dpi=300,
+            bbox_inches="tight",
+        )
+        plt.close(j2.figure)
+
     print(f"\n✅ Saved all analysis plots to: {out_dir}")
 
     if show:
-        # If you still want to eyeball the last figure interactively:
-        # (No-op here since we closed figures after saving.)
         print("Set --no-show to suppress GUI windows while saving plots.")
-        # You can re-open any image file from out_dir if needed.
 
 
 if __name__ == "__main__":
