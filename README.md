@@ -24,6 +24,15 @@ pip install pyautogui mss opencv-python numpy scikit-image Pillow easyocr keyboa
 
 This project aims to build an AI that learns to drive like a human in *Hill Climb Racing* but first the AI needs to see data in the game.
 
+
+
+#### Dial in screen capture regions
+First ensure that the coordinates `--region` is setup correctly.
+```powershell
+python main.py --preview-region --region 50 35 1400 1600 --distance-region 600 50 200 100
+```
+Keep dialing that in region (LEFT TOP WIDTH HEIGHT) to adjust to your monitor/game window AND distance traveled on the `--distance-region`
+
 #### Test computer vision on still image screenshot of game play
 ```powershell
 python main.py --images-in "C:\Users\ben\Videos\HCR\images_for_cv" --images-out "C:\Users\ben\Videos\HCR\processed_images" --csv "C:\Users\ben\Videos\HCR\images_stats.csv"
@@ -33,13 +42,6 @@ python main.py --images-in "C:\Users\ben\Videos\HCR\images_for_cv" --images-out 
 ```powershell
 python main.py --video-in "C:/Users/ben/Videos/HCR/HCR_raw.mp4" --video-out "C:/Users/ben/Videos/HCR/HCR_processed.mp4" --csv "C:/Users/ben/Videos/HCR/video_stats.csv"
 ```
-
-#### Dial in screen capture regions
-First ensure that the coordinates `--region` is setup correctly.
-```powershell
-python main.py --preview-region --region 68 35 1235 687
-```
-Keep dialing that in region (LEFT TOP WIDTH HEIGHT) to adjust to your monitor/game window.
 
 #### Record game play with region of game screen dialed in
 ```powershell
