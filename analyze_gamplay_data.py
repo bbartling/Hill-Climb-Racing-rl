@@ -61,10 +61,12 @@ def analyze_gameplay_data(csv_path: Path, show: bool = True):
     if "ground_slope" in df.columns:
         pair_vars.append("ground_slope")
 
-    g = sns.pairplot(
-        df, vars=pair_vars, hue="action", diag_kind="kde", corner=True
+    g = sns.pairplot(df, vars=pair_vars, hue="action", diag_kind="kde", corner=True)
+    title = (
+        "Gameplay Analysis: "
+        + ", ".join(v.title().replace("_", " ") for v in pair_vars)
+        + " by Action"
     )
-    title = "Gameplay Analysis: " + ", ".join(v.title().replace("_", " ") for v in pair_vars) + " by Action"
     g.figure.suptitle(title, y=1.02)
     g.figure.savefig(
         out_dir / f"pairplot_{'_'.join(pair_vars)}_by_action.png",

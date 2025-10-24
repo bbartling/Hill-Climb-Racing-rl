@@ -29,29 +29,31 @@ This project aims to build an AI that learns to drive like a human in *Hill Clim
 #### Dial in screen capture regions
 First ensure that the coordinates `--region` is setup correctly.
 ```powershell
-python main.py --preview-region --region 50 35 1400 1600 --distance-region 600 50 200 100
+python main.py --preview-region --region 50 35 1400 1600 --distance-region 600 50 200 100  
 ```
 Keep dialing that in region (LEFT TOP WIDTH HEIGHT) to adjust to your monitor/game window AND distance traveled on the `--distance-region`
 
-#### Test computer vision on still image screenshot of game play
+* OPTIONAL - Test computer vision on still image screenshot of game play
 ```powershell
 python main.py --images-in "C:\Users\ben\Videos\HCR\images_for_cv" --images-out "C:\Users\ben\Videos\HCR\processed_images" --csv "C:\Users\ben\Videos\HCR\images_stats.csv"
 ```
 
-#### Test computer vision on recorded video file of game play
+* OPTIONAL - Test computer vision on recorded video file of game play
 ```powershell
 python main.py --video-in "C:/Users/ben/Videos/HCR/HCR_raw.mp4" --video-out "C:/Users/ben/Videos/HCR/HCR_processed.mp4" --csv "C:/Users/ben/Videos/HCR/video_stats.csv"
 ```
 
 #### Record game play with region of game screen dialed in
 ```powershell
-python main.py --record --region 68 35 1800 1200 --csv manual_play_data.csv --fps 30
+python main.py --record --region 50 35 1400 1600 --distance-region 600 50 200 100  --csv manual_play_data.csv --fps 30 
 ```
 
 Optional game play record with `--record-video-out` added.
 ```powershell
-python main.py --record --region 68 35 1800 1200 --csv manual_play_data.csv --fps 30 --record-video-out "C:/Users/ben/Videos/HCR/gameplay_annotated.mp4"
+python main.py --record --region 50 35 1400 1600 --distance-region 600 50 200 100  --csv manual_play_data.csv --fps 30  --record-video-out "C:/Users/ben/Videos/HCR/gameplay_annotated.mp4"
 ```
+
+
 
 * Press s to start, q to quit.
 * Default keys for HCR: right arrow = gas peddle, left arrow = brake peddle

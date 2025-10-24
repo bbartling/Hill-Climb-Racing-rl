@@ -8,109 +8,157 @@ from pathlib import Path
 
 import cv2
 import numpy as np
+import pytesseract
+from PIL import Image
+import re
+from typing import Tuple, Optional
 
-# Optional deps for record/preview/select modes
-try:
-    import keyboard
-    from mss import mss
-except ImportError:
-    print("Warning: 'keyboard' or 'mss' not installed. Record/preview modes disabled.")
-    keyboard = None
-    mss = None
 
-# Optional deps for OCR
-try:
-    import pytesseract
-    from PIL import Image
+import keyboard
+from mss import mss
 
-    # --- TESSERACT INSTALLATION CHECK ---
-    # You must install the Tesseract-OCR engine separately for this to work.
-    # Windows: https://github.com/UB-Mannheim/tesseract/wiki
-    # Mac (brew install tesseract), Linux (sudo apt-get install tesseract-ocr)
-    #
-    # After installing, you might need to tell pytesseract where to find it:
-    # On Windows, it might be:
-    # pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
-    # --- UPDATE THIS LINE ---
-    # This is the standard, non-protected path for Tesseract.
-    pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
-    # -------------------------------------
 
-except ImportError:
-    print("--- WARNING ---")
-    print("Pytesseract or PIL (Pillow) not installed.")
-    print("Install them with 'pip install pytesseract Pillow'")
-    print("You also MUST install Google's Tesseract-OCR engine on your system.")
-    print("See: https://github.com/tesseract-ocr/tesseract")
-    print("Distance/speed OCR features will be disabled.")
-    print("---------------")
-    pytesseract = None
-    Image = None
+
+pytesseract.pytesseract.tesseract_cmd = (
+    r"C:\Program Files\Tesseract-OCR\tesseract.exe"
+)
 
 
 # Now imports the augmented function
 from utils_cv import annotate_frame
 
 
-# -----------------------------
-# OCR Helper Function
-# -----------------------------
-def parse_distance_from_image(frame: np.ndarray, distance_region: dict | None):
+def parse_distance_from_image(frame_bgr: np.ndarray,
+                              distance_region: dict
+                              ) -> Tuple[Optional[int], str]:
     """
-    Uses Pytesseract to OCR the distance (e.g., '322m') from a cropped region.
-    Returns (int_distance, raw_ocr_text) or (None, None)
+    Try hard to OCR the distance HUD.
+    Returns:
+        distance_int (int | None), raw_text (str)
+    Strategy:
+      - crop HUD box
+      - preprocess for high-contrast digits
+      - upsample
+      - run tesseract in 2 passes (strict + fallback)
     """
-    global pytesseract  # <-- Ensures we can modify the global var on error
-    
-    if pytesseract is None or Image is None or distance_region is None:
-        return None, None
 
-    try:
-        # Crop to the specified region
-        l, t, w, h = (
-            distance_region["left"],
-            distance_region["top"],
-            distance_region["width"],
-            distance_region["height"],
+    # Safety: bad region
+    if distance_region is None:
+        return None, ""
+
+    l = distance_region["left"]
+    t = distance_region["top"]
+    w = distance_region["width"]
+    h = distance_region["height"]
+    sub = frame_bgr[t:t + h, l:l + w]
+
+    if sub.size == 0:
+        return None, ""
+
+    # ---------- helper: run tesseract and parse digits ----------
+    def ocr_and_parse(bin_img: np.ndarray, psm: int) -> Tuple[Optional[int], str]:
+        # Upscale (helps a TON for tiny HUD fonts)
+        scale = 3
+        big = cv2.resize(
+            bin_img,
+            None,
+            fx=scale,
+            fy=scale,
+            interpolation=cv2.INTER_LINEAR,
         )
 
-        # Ensure crop is valid within the frame
-        h_frame, w_frame = frame.shape[:2]
-        if t < 0 or l < 0 or t + h > h_frame or l + w > w_frame:
-            # print(f"Warning: Distance region {distance_region} is outside frame bounds {w_frame}x{h_frame}")
-            return None, None
+        pil_img = Image.fromarray(big)
 
-        crop = frame[t : t + h, l : l + w]
+        config = (
+            f"--psm {psm} "
+            "-c tessedit_char_whitelist=0123456789m "
+            "-c classify_bln_numeric_mode=1"
+        )
+        raw = pytesseract.image_to_string(pil_img, config=config).strip()
 
-        # Pre-processing for OCR:
-        # Isolate *white* pixels using a BGR color mask.
-        # This is more robust than grayscale thresholding if the background is also bright.
-        white_mask = cv2.inRange(crop, (200, 200, 200), (255, 255, 255))
+        # grab only digits because we only care about distance number
+        just_digits = re.sub(r"[^0-9]", "", raw)
+        if just_digits == "":
+            dist_val = None
+        else:
+            try:
+                dist_val = int(just_digits)
+            except ValueError:
+                dist_val = None
 
-        # Invert the mask to get black text on a white background (better for Tesseract)
-        ocr_img = cv2.bitwise_not(white_mask)
+        return dist_val, raw
 
-        # Convert to PIL Image
-        img_pil = Image.fromarray(ocr_img)
+    # ---------- STEP 1: grayscale + adaptive threshold ----------
+    gray = cv2.cvtColor(sub, cv2.COLOR_BGR2GRAY)
 
-        # --psm 7: Treat the image as a single line of text.
-        # Whitelist only numbers and the letter 'm'.
-        config = r"--psm 7 -c tessedit_char_whitelist=0123456789m"
-        raw_text = pytesseract.image_to_string(img_pil, config=config).strip()
+    # adaptive threshold handles lighting flicker / glow
+    # we invert so we end up "black text on white" after morphology later
+    # Note: blockSize MUST be odd and ~ digit height-ish. 15-31 works well.
+    thr = cv2.adaptiveThreshold(
+        gray,
+        255,
+        cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+        cv2.THRESH_BINARY_INV,  # so digits become white blobs
+        21,
+        10,
+    )
 
-        # Clean text to get only digits
-        cleaned_text = re.sub(r"[^0-9]", "", raw_text)
-        if not cleaned_text:
-            return None, raw_text
+    # ---------- STEP 2: biggest contour crop (so we don't feed sky / hills) ----------
+    contours, _ = cv2.findContours(thr, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    if contours:
+        c = max(contours, key=cv2.contourArea)
+        x, y, bw, bh = cv2.boundingRect(c)
 
-        return int(cleaned_text), raw_text
+        pad = 4
+        x0 = max(x - pad, 0)
+        y0 = max(y - pad, 0)
+        x1 = min(x + bw + pad, thr.shape[1])
+        y1 = min(y + bh + pad, thr.shape[0])
+        roi = thr[y0:y1, x0:x1]
+    else:
+        roi = thr
 
-    except Exception as e:
-        # This can happen if Tesseract isn't installed correctly
-        print(f"Error in OCR: {e}. Is Tesseract engine installed and in PATH?")
-        # We can now safely assign to the global variable
-        pytesseract = None  # Disable further attempts
-        return None, None
+    # ---------- STEP 3: thicken strokes & clean speckles ----------
+    # We have white digits on black (because of THRESH_BINARY_INV above).
+    # We'll close tiny gaps so "1234" looks solid.
+    kernel = np.ones((3, 3), np.uint8)
+    closed = cv2.morphologyEx(roi, cv2.MORPH_CLOSE, kernel, iterations=1)
+
+    # light blur can smooth jaggy edges so tess stops hallucinating extra tails
+    smooth = cv2.GaussianBlur(closed, (3, 3), 0)
+
+    # Invert for tesseract: black digits on white background
+    prep_main = cv2.bitwise_not(smooth)
+
+    # ---------- PASS A (strict): psm 7 (single line) ----------
+    dist_a, raw_a = ocr_and_parse(prep_main, psm=7)
+
+    # ---------- PASS B (fallback): more forgiving  --psm 13 ----------
+    # Sometimes adaptiveThreshold nukes shadows too hard, so let's also try
+    # a slightly looser binarization (global Otsu) and a different psm.
+    if dist_a is None:
+        # global Otsu on grayscale crop of JUST the ROI box for fallback
+        roi_gray = gray[y0:y1, x0:x1] if contours else gray
+        # use Otsu, invert so digits become white blobs
+        _, thr_otsu = cv2.threshold(
+            roi_gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU
+        )
+
+        # re-close to thicken
+        closed2 = cv2.morphologyEx(thr_otsu, cv2.MORPH_CLOSE, kernel, iterations=1)
+        smooth2 = cv2.GaussianBlur(closed2, (3, 3), 0)
+        prep_fallback = cv2.bitwise_not(smooth2)
+
+        dist_b, raw_b = ocr_and_parse(prep_fallback, psm=13)
+
+        # choose best
+        if dist_b is not None:
+            return dist_b, raw_b
+        else:
+            return None, raw_b  # raw_b might still be useful debug text
+
+    # PASS A worked
+    return dist_a, raw_a
 
 
 # -----------------------------
@@ -180,9 +228,11 @@ def process_images(
                     (0, 0, 255),
                     2,
                 )
-                
+
                 # Format the text to show, even if OCR failed
-                dist_label = f"Dist: {distance}m" if distance is not None else "Dist: None"
+                dist_label = (
+                    f"Dist: {distance}m" if distance is not None else "Dist: None"
+                )
                 raw_label = f"({raw_text})" if raw_text else "('')"
 
                 # Draw Dist label
@@ -192,7 +242,7 @@ def process_images(
                     (20, 80),
                     cv2.FONT_HERSHEY_SIMPLEX,
                     0.7,
-                    (0, 0, 0), # Shadow
+                    (0, 0, 0),  # Shadow
                     3,
                     cv2.LINE_AA,
                 )
@@ -202,11 +252,11 @@ def process_images(
                     (20, 80),
                     cv2.FONT_HERSHEY_SIMPLEX,
                     0.7,
-                    (255, 255, 255), # White
+                    (255, 255, 255),  # White
                     2,
                     cv2.LINE_AA,
                 )
-                
+
                 # Draw Raw label
                 cv2.putText(
                     annotated,
@@ -214,7 +264,7 @@ def process_images(
                     (20, 110),
                     cv2.FONT_HERSHEY_SIMPLEX,
                     0.5,
-                    (0, 0, 0), # Shadow
+                    (0, 0, 0),  # Shadow
                     3,
                     cv2.LINE_AA,
                 )
@@ -224,7 +274,7 @@ def process_images(
                     (20, 110),
                     cv2.FONT_HERSHEY_SIMPLEX,
                     0.5,
-                    (255, 255, 255), # White
+                    (255, 255, 255),  # White
                     1,
                     cv2.LINE_AA,
                 )
@@ -257,6 +307,176 @@ def process_images(
         csv_file.close()
 
 
+def record_mode(
+    csv_path: Path,
+    no_display: bool,
+    game_region: dict,
+    fps: float,
+    video_out: Path | None,
+    distance_region: dict | None,
+):
+    if keyboard is None or mss is None:
+        raise RuntimeError(
+            "'record' mode requires 'keyboard' and 'mss' packages installed."
+        )
+
+    print("--- Manual Gameplay Recorder ---")
+    print("Bring the game window into focus. Press 's' to start, 'q' to quit.")
+    print(f"Region: {game_region}")
+    if distance_region:
+        print(f"Distance Region: {distance_region}")
+    keyboard.wait("s")
+    print("▶️ Recording started! Press 'q' to quit.")
+
+    # CSV setup / append
+    file_exists = csv_path.exists()
+    csv_file = open(csv_path, "a", newline="", encoding="utf-8")
+    writer = csv.writer(csv_file)
+    if not file_exists:
+        writer.writerow(
+            [
+                "timestamp",
+                "jeep_angle",
+                "height_px",
+                "ground_slope",
+                "distance_m",
+                "speed_mps",
+                "gas_pressed",
+                "brake_pressed",
+            ]
+        )
+
+    delay_ms = int(1000 / max(1.0, fps))
+    target_delay_s = 1.0 / max(1.0, fps)
+
+    writer_v = None
+
+    # rolling state for speed calc
+    prev_distance = None
+    prev_timestamp = None
+
+    with mss() as sct:
+        try:
+            while True:
+                loop_start_time = time.time()
+
+                # quit hotkey
+                if keyboard.is_pressed("q"):
+                    print("\n⏹️ Recording stopped.")
+                    break
+
+                # grab frame from screen
+                sct_img = sct.grab(game_region)
+                frame = cv2.cvtColor(np.array(sct_img), cv2.COLOR_BGRA2BGR)
+                current_timestamp = time.time()
+
+                # run vision annotator (angle, height, slope lines, etc)
+                annotated, jeep_angle, height_px, ground_slope = annotate_frame(frame)
+
+                # OCR HUD read
+                distance_val, raw_text = parse_distance_from_image(frame, distance_region)
+
+                # distance sanity clamp (kill insane OCR)
+                if distance_val is not None and distance_val > 20000:
+                    distance_val = None
+
+                # pedal state (ground truth labels)
+                gas_pressed = 1 if keyboard.is_pressed("right") else 0
+                brake_pressed = 1 if keyboard.is_pressed("left") else 0
+
+                # estimate speed from distance deltas
+                speed_mps = None
+                if (
+                    distance_val is not None
+                    and prev_distance is not None
+                    and prev_timestamp is not None
+                ):
+                    time_delta = current_timestamp - prev_timestamp
+                    dist_delta = distance_val - prev_distance
+                    if time_delta > 0 and abs(dist_delta) < 100:
+                        speed_mps = dist_delta / time_delta
+
+                # write CSV row for training data
+                writer.writerow(
+                    [
+                        current_timestamp,
+                        jeep_angle if jeep_angle is not None else "",
+                        height_px if height_px is not None else "",
+                        ground_slope if ground_slope is not None else "",
+                        distance_val if distance_val is not None else "",
+                        speed_mps if speed_mps is not None else "",
+                        gas_pressed,
+                        brake_pressed,
+                    ]
+                )
+
+                # HUD overlay
+                annotated = draw_hud(
+                    annotated=annotated,
+                    jeep_angle=jeep_angle,
+                    height_px=height_px,
+                    ground_slope=ground_slope,
+                    distance=distance_val,
+                    raw_text=raw_text,
+                    speed_mps=speed_mps,
+                    gas=gas_pressed,
+                    brake=brake_pressed,
+                    distance_region=distance_region,
+                )
+
+                # Init video writer on first frame if needed
+                if video_out:
+                    if writer_v is None:
+                        fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+                        writer_v = cv2.VideoWriter(
+                            str(video_out),
+                            fourcc,
+                            fps,
+                            (annotated.shape[1], annotated.shape[0]),
+                        )
+                        if not writer_v.isOpened():
+                            raise RuntimeError(
+                                f"Could not open VideoWriter: {video_out}"
+                            )
+                    writer_v.write(annotated)
+
+                # live preview window unless --no-display
+                if not no_display:
+                    cv2.imshow("HCR Recorder (press 'q' to stop)", annotated)
+
+                    # try to throttle loop to requested FPS
+                    loop_end_time = time.time()
+                    elapsed_s = loop_end_time - loop_start_time
+                    wait_s = target_delay_s - elapsed_s
+                    wait_ms = max(1, int(wait_s * 1000))
+
+                    if cv2.waitKey(wait_ms) & 0xFF == ord("q"):
+                        break
+                else:
+                    # headless, just sleep to respect FPS
+                    loop_end_time = time.time()
+                    elapsed_s = loop_end_time - loop_start_time
+                    wait_s = target_delay_s - elapsed_s
+                    if wait_s > 0:
+                        time.sleep(wait_s)
+
+                # update for next speed calc
+                if distance_val is not None:
+                    prev_distance = distance_val
+                    prev_timestamp = current_timestamp
+                # if OCR failed / clamped, don't advance prev_*
+
+        finally:
+            csv_file.close()
+            if writer_v:
+                writer_v.release()
+                print(f"🎥 Video saved to {video_out}")
+            if not no_display:
+                cv2.destroyAllWindows()
+            print(f"Data saved to {csv_path}")
+
+
+
 def process_video(
     video_in: Path,
     video_out: Path | None,
@@ -269,7 +489,7 @@ def process_video(
 
     fps = cap.get(cv2.CAP_PROP_FPS)
     if not fps or fps <= 1e-3:
-        fps = 30.0
+        fps = 30.0  # fallback
 
     ok, frame = cap.read()
     if not ok or frame is None:
@@ -287,6 +507,7 @@ def process_video(
         cap.release()
         raise RuntimeError(f"Could not open VideoWriter: {video_out}")
 
+    # CSV setup
     writer_c = None
     csv_file = None
     if csv_path:
@@ -300,7 +521,7 @@ def process_video(
                 "height_px",
                 "ground_slope",
                 "distance_m",
-                "speed_mps",  # New speed column
+                "speed_mps",
                 "gas_pressed",
                 "brake_pressed",
             ]
@@ -308,82 +529,37 @@ def process_video(
 
     print(f"Annotating video -> {video_out} | {w}x{h} @ {fps:.2f} FPS")
 
-    # --- Process first frame ---
+    # ---- first frame ----
     i = 0
     timestamp_s = i / fps
+
     annotated, jeep_angle, height_px, ground_slope = annotate_frame(frame)
 
-    distance, raw_text = parse_distance_from_image(frame, distance_region)
-    speed_mps = None  # Can't calculate speed on first frame
-    prev_distance = distance
+    distance_val, raw_text = parse_distance_from_image(frame, distance_region)
+
+    # clamp insane OCR
+    if distance_val is not None and distance_val > 20000:
+        distance_val = None
+
+    speed_mps = None
+    prev_distance = distance_val
     prev_timestamp_s = timestamp_s
 
-    # Add OCR info
-    if distance is not None:
-        cv2.putText(
-            annotated,
-            f"Dist: {distance}m",
-            (20, 80),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            0.7,
-            (0, 0, 0), # Shadow
-            3,
-            cv2.LINE_AA,
-        )
-        cv2.putText(
-            annotated,
-            f"Dist: {distance}m",
-            (20, 80),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            0.7,
-            (255, 255, 255), # White
-            2,
-            cv2.LINE_AA,
-        )
-    if raw_text:
-        cv2.putText(
-            annotated,
-            f"({raw_text})",
-            (20, 110),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            0.5,
-            (0, 0, 0), # Shadow
-            3,
-            cv2.LINE_AA,
-        )
-        cv2.putText(
-            annotated,
-            f"({raw_text})",
-            (20, 110),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            0.5,
-            (255, 255, 255), # White
-            1,
-            cv2.LINE_AA,
-        )
-    # Speed text (None on first frame)
-    cv2.putText(
-        annotated,
-        "Speed: N/A",
-        (20, 140),
-        cv2.FONT_HERSHEY_SIMPLEX,
-        0.7,
-        (0, 0, 0), # Shadow
-        3,
-        cv2.LINE_AA,
-    )
-    cv2.putText(
-        annotated,
-        "Speed: N/A",
-        (20, 140),
-        cv2.FONT_HERSHEY_SIMPLEX,
-        0.7,
-        (255, 255, 255), # White
-        2,
-        cv2.LINE_AA,
+    annotated = draw_hud(
+        annotated=annotated,
+        jeep_angle=jeep_angle,
+        height_px=height_px,
+        ground_slope=ground_slope,
+        distance=distance_val,
+        raw_text=raw_text,
+        speed_mps=speed_mps,
+        gas=0,
+        brake=0,
+        distance_region=distance_region,
     )
 
     writer_v.write(annotated)
+
     if writer_c:
         writer_c.writerow(
             [
@@ -392,106 +568,54 @@ def process_video(
                 jeep_angle if jeep_angle is not None else "",
                 height_px if height_px is not None else "",
                 ground_slope if ground_slope is not None else "",
-                distance if distance is not None else "",
+                distance_val if distance_val is not None else "",
                 speed_mps if speed_mps is not None else "",
                 0,
                 0,
             ]
         )
+
     i += 1
 
-    # --- Continue with the rest ---
+    # ---- rest of frames ----
     while True:
         ok, frame = cap.read()
         if not ok:
             break
 
         timestamp_s = i / fps
+
         annotated, jeep_angle, height_px, ground_slope = annotate_frame(frame)
 
-        # --- New OCR & Speed Logic ---
-        distance, raw_text = parse_distance_from_image(frame, distance_region)
-        speed_mps = None
+        distance_val, raw_text = parse_distance_from_image(frame, distance_region)
 
+        # clamp insane OCR
+        if distance_val is not None and distance_val > 20000:
+            distance_val = None
+
+        speed_mps = None
         if (
-            distance is not None
+            distance_val is not None
             and prev_distance is not None
             and prev_timestamp_s is not None
         ):
-            time_delta = timestamp_s - prev_timestamp_s
-            dist_delta = distance - prev_distance
-            # Plausibility check: positive time, reasonable distance change
-            if time_delta > 0 and abs(dist_delta) < 100:
-                speed_mps = dist_delta / time_delta
+            dt = timestamp_s - prev_timestamp_s
+            dist_delta = distance_val - prev_distance
+            if dt > 0 and abs(dist_delta) < 100:
+                speed_mps = dist_delta / dt
 
-        # Add OCR info
-        if distance is not None:
-            cv2.putText(
-                annotated,
-                f"Dist: {distance}m",
-                (20, 80),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                0.7,
-                (0, 0, 0), # Shadow
-                3,
-                cv2.LINE_AA,
-            )
-            cv2.putText(
-                annotated,
-                f"Dist: {distance}m",
-                (20, 80),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                0.7,
-                (255, 255, 255), # White
-                2,
-                cv2.LINE_AA,
-            )
-        if raw_text:
-            cv2.putText(
-                annotated,
-                f"({raw_text})",
-                (20, 110),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                0.5,
-                (0, 0, 0), # Shadow
-                3,
-                cv2.LINE_AA,
-            )
-            cv2.putText(
-                annotated,
-                f"({raw_text})",
-                (20, 110),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                0.5,
-                (255, 255, 255), # White
-                1,
-                cv2.LINE_AA,
-            )
-        
-        # --- ADDED SPEED TEXT BLOCK ---
-        speed_text = f"Speed: {speed_mps:.1f} m/s" if speed_mps is not None else "Speed: N/A"
-        if speed_mps is not None:
-            cv2.putText(
-                annotated,
-                speed_text,
-                (20, 140),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                0.7,
-                (0, 0, 0), # Shadow
-                3,
-                cv2.LINE_AA,
-            )
-            cv2.putText(
-                annotated,
-                speed_text,
-                (20, 140),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                0.7,
-                (255, 255, 255), # White
-                2,
-                cv2.LINE_AA,
-            )
-        # --- End New Logic ---
+        annotated = draw_hud(
+            annotated=annotated,
+            jeep_angle=jeep_angle,
+            height_px=height_px,
+            ground_slope=ground_slope,
+            distance=distance_val,
+            raw_text=raw_text,
+            speed_mps=speed_mps,
+            gas=0,
+            brake=0,
+            distance_region=distance_region,
+        )
 
         writer_v.write(annotated)
 
@@ -503,20 +627,21 @@ def process_video(
                     jeep_angle if jeep_angle is not None else "",
                     height_px if height_px is not None else "",
                     ground_slope if ground_slope is not None else "",
-                    distance if distance is not None else "",
+                    distance_val if distance_val is not None else "",
                     speed_mps if speed_mps is not None else "",
                     0,
                     0,
                 ]
             )
 
-        # Update prev values for next loop
-        if distance is not None:
-            prev_distance = distance
-        prev_timestamp_s = timestamp_s
+        # only advance prev_* if OCR didn't glitch
+        if distance_val is not None:
+            prev_distance = distance_val
+            prev_timestamp_s = timestamp_s
 
         if i % 60 == 0:
             print(f"  {i} frames...")
+
         i += 1
 
     cap.release()
@@ -526,225 +651,6 @@ def process_video(
     print("✅ Video saved:", video_out)
 
 
-def record_mode(
-    csv_path: Path,
-    no_display: bool,
-    game_region: dict,
-    fps: float,
-    video_out: Path | None,
-    distance_region: dict | None,  # New arg
-):
-    if keyboard is None or mss is None:
-        raise RuntimeError(
-            "'record' mode requires 'keyboard' and 'mss' packages installed."
-        )
-
-    print("--- Manual Gameplay Recorder ---")
-    print("Bring the game window into focus. Press 's' to start, 'q' to quit.")
-    print(f"Region: {game_region}")
-    if distance_region:
-        print(f"Distance Region: {distance_region}")
-    keyboard.wait("s")
-    print("▶️ Recording started! Press 'q' to quit.")
-
-    file_exists = csv_path.exists()
-    csv_file = open(csv_path, "a", newline="", encoding="utf-8")
-    writer = csv.writer(csv_file)
-    if not file_exists:
-        writer.writerow(
-            [
-                "timestamp",
-                "jeep_angle",
-                "height_px",
-                "ground_slope",
-                "distance_m",
-                "speed_mps",  # New columns
-                "gas_pressed",
-                "brake_pressed",
-            ]
-        )
-
-    delay_ms = int(1000 / max(1.0, fps))
-    target_delay_s = 1.0 / max(1.0, fps)
-    writer_v = None
-
-    # For speed calculation
-    prev_distance = None
-    prev_timestamp = None
-
-    with mss() as sct:
-        try:
-            while True:
-                loop_start_time = time.time()
-                if keyboard.is_pressed("q"):
-                    print("\n⏹️ Recording stopped.")
-                    break
-
-                sct_img = sct.grab(game_region)
-                frame = cv2.cvtColor(np.array(sct_img), cv2.COLOR_BGRA2BGR)
-                current_timestamp = time.time()
-
-                annotated, jeep_angle, height_px, ground_slope = annotate_frame(frame)
-
-                # --- New OCR & Speed Logic ---
-                distance, raw_text = parse_distance_from_image(frame, distance_region)
-                speed_mps = None
-
-                if (
-                    distance is not None
-                    and prev_distance is not None
-                    and prev_timestamp is not None
-                ):
-                    time_delta = current_timestamp - prev_timestamp
-                    dist_delta = distance - prev_distance
-                    if time_delta > 0 and abs(dist_delta) < 100:
-                        speed_mps = dist_delta / time_delta
-
-                gas = 1 if keyboard.is_pressed("right") else 0
-                brake = 1 if keyboard.is_pressed("left") else 0
-
-                writer.writerow(
-                    [
-                        current_timestamp,
-                        jeep_angle if jeep_angle is not None else "",
-                        height_px if height_px is not None else "",
-                        ground_slope if ground_slope is not None else "",
-                        distance if distance is not None else "",
-                        speed_mps if speed_mps is not None else "",
-                        gas,
-                        brake,
-                    ]
-                )
-
-                # Add overlays *before* video write / display
-                if distance is not None:
-                    cv2.putText(
-                        annotated,
-                        f"Dist: {distance}m",
-                        (20, 80),
-                        cv2.FONT_HERSHEY_SIMPLEX,
-                        0.7,
-                        (0, 0, 0), # Shadow
-                        3,
-                        cv2.LINE_AA,
-                    )
-                    cv2.putText(
-                        annotated,
-                        f"Dist: {distance}m",
-                        (20, 80),
-                        cv2.FONT_HERSHEY_SIMPLEX,
-                        0.7,
-                        (255, 255, 255), # White
-                        2,
-                        cv2.LINE_AA,
-                    )
-                if raw_text:
-                    cv2.putText(
-                        annotated,
-                        f"({raw_text})",
-                        (20, 110),
-                        cv2.FONT_HERSHEY_SIMPLEX,
-                        0.5,
-                        (0, 0, 0), # Shadow
-                        3,
-                        cv2.LINE_AA,
-                    )
-                    cv2.putText(
-                        annotated,
-                        f"({raw_text})",
-                        (20, 110),
-                        cv2.FONT_HERSHEY_SIMPLEX,
-                        0.5,
-                        (255, 255, 255), # White
-                        1,
-                        cv2.LINE_AA,
-                    )
-                
-                speed_text = f"Speed: {speed_mps:.1f} m/s" if speed_mps is not None else "Speed: N/A"
-                if speed_mps is not None:
-                    cv2.putText(
-                        annotated,
-                        speed_text,
-                        (20, 140),
-                        cv2.FONT_HERSHEY_SIMPLEX,
-                        0.7,
-                        (0, 0, 0), # Shadow
-                        3,
-                        cv2.LINE_AA,
-                    )
-                    cv2.putText(
-                        annotated,
-                        speed_text,
-                        (20, 140),
-                        cv2.FONT_HERSHEY_SIMPLEX,
-                        0.7,
-                        (255, 255, 255), # White
-                        2,
-                        cv2.LINE_AA,
-                    )
-                # --- End New Logic ---
-
-                if video_out:
-                    if writer_v is None:
-                        fourcc = cv2.VideoWriter_fourcc(*"mp4v")
-                        writer_v = cv2.VideoWriter(
-                            str(video_out),
-                            fourcc,
-                            fps,
-                            (annotated.shape[1], annotated.shape[0]),
-                        )
-                        if not writer_v.isOpened():
-                            raise RuntimeError(
-                                f"Could not open VideoWriter: {video_out}"
-                            )
-                    writer_v.write(annotated)
-
-                if not no_display:
-                    # We already modified 'annotated', so just add Action text
-                    action_text = "GAS" if gas else ("BRAKE" if brake else "COAST")
-                    cv2.putText(
-                        annotated,  # Use 'annotated' directly
-                        f"Action: {action_text}",
-                        (20, 40),
-                        cv2.FONT_HERSHEY_SIMPLEX,
-                        1.0,
-                        (0, 255, 0),
-                        2,
-                        cv2.LINE_AA,
-                    )
-                    
-                    # --- REMOVED REDUNDANT TEXT DRAWING ---
-
-                    cv2.imshow("HCR Recorder (press 'q' to stop)", annotated)
-                    # Use a calculated delay to try and match target FPS
-                    loop_end_time = time.time()
-                    elapsed_s = loop_end_time - loop_start_time
-                    wait_s = target_delay_s - elapsed_s
-                    wait_ms = max(1, int(wait_s * 1000))
-
-                    if cv2.waitKey(wait_ms) & 0xFF == ord("q"):
-                        break
-                else:
-                    # Headless, sleep to respect FPS
-                    loop_end_time = time.time()
-                    elapsed_s = loop_end_time - loop_start_time
-                    wait_s = target_delay_s - elapsed_s
-                    if wait_s > 0:
-                        time.sleep(wait_s)
-
-                # Update prev values for next loop
-                if distance is not None:
-                    prev_distance = distance
-                prev_timestamp = current_timestamp
-
-        finally:
-            csv_file.close()
-            if writer_v:
-                writer_v.release()
-                print(f"🎥 Video saved to {video_out}")
-            if not no_display:
-                cv2.destroyAllWindows()
-            print(f"Data saved to {csv_path}")
 
 
 # -----------------------------
@@ -757,7 +663,7 @@ def preview_region(region: dict, distance_region: dict | None):
     with mss() as sct:
         sct_img = sct.grab(region)
         frame = cv2.cvtColor(np.array(sct_img), cv2.COLOR_BGRA2BGR)
-        
+
         # Draw main region border (Yellow)
         cv2.rectangle(
             frame, (2, 2), (frame.shape[1] - 3, frame.shape[0] - 3), (0, 255, 255), 2
@@ -800,7 +706,7 @@ def preview_region(region: dict, distance_region: dict | None):
                 # Run OCR on this specific region from the captured frame
                 # The 'frame' is already the cropped main region, so distance_region coords are correct
                 distance, raw_text = parse_distance_from_image(frame, distance_region)
-                
+
                 print("\n--- OCR TEST RESULTS ---")
                 print(f"Raw Text: '{raw_text}'")
                 print(f"Parsed Distance: {distance}")
@@ -812,20 +718,20 @@ def preview_region(region: dict, distance_region: dict | None):
                 cv2.putText(
                     frame,
                     ocr_label,
-                    (l, t + h + 20), # Position text below the red box
+                    (l, t + h + 20),  # Position text below the red box
                     cv2.FONT_HERSHEY_SIMPLEX,
                     0.6,
-                    (0, 0, 0), # Shadow
+                    (0, 0, 0),  # Shadow
                     3,
                     cv2.LINE_AA,
                 )
                 cv2.putText(
                     frame,
                     ocr_label,
-                    (l, t + h + 20), # Position text below the red box
+                    (l, t + h + 20),  # Position text below the red box
                     cv2.FONT_HERSHEY_SIMPLEX,
                     0.6,
-                    (255, 255, 255), # White
+                    (255, 255, 255),  # White
                     2,
                     cv2.LINE_AA,
                 )
@@ -876,12 +782,14 @@ def select_region_interactive(save_to: Path | None = None):
     )
     # Use main window
     cv2.namedWindow("Select Region", cv2.WND_PROP_FULLSCREEN)
-    cv2.setWindowProperty("Select Region", cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
+    cv2.setWindowProperty(
+        "Select Region", cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN
+    )
     r = cv2.selectROI("Select Region", clone, fromCenter=False, showCrosshair=True)
     cv2.destroyWindow("Select Region")
-    
+
     x, y, w, h = map(int, r)
-    if w == 0 or h == 0: # User pressed ESC
+    if w == 0 or h == 0:  # User pressed ESC
         print("Region selection cancelled.")
         return None
 
@@ -898,6 +806,139 @@ def select_region_interactive(save_to: Path | None = None):
         )
         print(f"Saved to {save_to.resolve()}")
     return region
+
+
+def draw_hud(
+    annotated,
+    jeep_angle,
+    height_px,
+    ground_slope,
+    distance,
+    raw_text,
+    speed_mps,
+    gas,
+    brake,
+    distance_region,
+):
+    """
+    Draw ALL overlay text/boxes in a consistent way so both preview,
+    record, and post-process videos look identical.
+    """
+
+    # 1. Draw the distance-region capture box in red so it's visible in output video
+    if distance_region is not None:
+        l = distance_region["left"]
+        t = distance_region["top"]
+        w = distance_region["width"]
+        h = distance_region["height"]
+        cv2.rectangle(annotated, (l, t), (l + w, t + h), (0, 0, 255), 2)
+        cv2.putText(
+            annotated,
+            "Distance Region",
+            (l, max(0, t - 10)),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.5,
+            (0, 0, 255),
+            2,
+            cv2.LINE_AA,
+        )
+
+    # 2. Decide action text
+    if gas:
+        action_text = "GAS"
+    elif brake:
+        action_text = "BRAKE"
+    else:
+        action_text = "COAST"
+
+    # 3. Overlay block (top-left corner HUD)
+    # Action line
+    cv2.putText(
+        annotated,
+        f"Action: {action_text}",
+        (20, 40),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        1.0,
+        (0, 255, 0),
+        2,
+        cv2.LINE_AA,
+    )
+
+    # Distance line (shadowed white text for readability)
+    dist_label = f"Dist: {distance}m" if distance is not None else "Dist: None"
+    cv2.putText(
+        annotated,
+        dist_label,
+        (20, 80),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.7,
+        (0, 0, 0),
+        3,
+        cv2.LINE_AA,
+    )
+    cv2.putText(
+        annotated,
+        dist_label,
+        (20, 80),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.7,
+        (255, 255, 255),
+        2,
+        cv2.LINE_AA,
+    )
+
+    # Raw OCR text (for debugging OCR quality)
+    raw_label = f"({raw_text})" if raw_text else "('')"
+    cv2.putText(
+        annotated,
+        raw_label,
+        (20, 110),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.5,
+        (0, 0, 0),
+        3,
+        cv2.LINE_AA,
+    )
+    cv2.putText(
+        annotated,
+        raw_label,
+        (20, 110),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.5,
+        (255, 255, 255),
+        1,
+        cv2.LINE_AA,
+    )
+
+    # Speed line
+    speed_label = (
+        f"Speed: {speed_mps:.1f} m/s" if speed_mps is not None else "Speed: N/A"
+    )
+    cv2.putText(
+        annotated,
+        speed_label,
+        (20, 140),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.7,
+        (0, 0, 0),
+        3,
+        cv2.LINE_AA,
+    )
+    cv2.putText(
+        annotated,
+        speed_label,
+        (20, 140),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.7,
+        (255, 255, 255),
+        2,
+        cv2.LINE_AA,
+    )
+
+    # Note: jeep_angle, height_px, and ground_slope are already rendered
+    # by annotate_frame() itself in your code, so we don't redraw them here.
+
+    return annotated
 
 
 # -----------------------------
@@ -992,14 +1033,10 @@ def main():
     # --- End New ---
 
     if args.images_in:
-        process_images(
-            args.images_in, args.images_out, args.csv, distance_region_dict
-        )
+        process_images(args.images_in, args.images_out, args.csv, distance_region_dict)
         return
     if args.video_in:
-        process_video(
-            args.video_in, args.video_out, args.csv, distance_region_dict
-        )
+        process_video(args.video_in, args.video_out, args.csv, distance_region_dict)
         return
 
     # --- Region tools ---
@@ -1028,7 +1065,7 @@ def main():
         # Pass both regions to the preview function
         preview_region(main_region_dict, distance_region_dict)
         return
-    
+
     if args.record:
         if args.csv is None:
             raise SystemExit("Please provide --csv for record mode.")
@@ -1045,4 +1082,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
